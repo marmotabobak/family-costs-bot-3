@@ -10,37 +10,63 @@ jobs:
   tests:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        python-version: [ "3.10", "3.11" ]
+
     services:
       postgres:
-        image: postgres14
+        image: postgres:14
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
           POSTGRES_DB: test_db
         ports:
           - 5432:5432
+        # Настройки healthcheck, чтобы база была готова к запросам.
         options: >-
           --health-cmd="pg_isready -U test"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
 
+    # Переменные окружения для приложения.
     env:
-      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5432/test_db
+      DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test_db
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python-version }}
 
-      - name: Install dependencies
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
+            ${{ runner.os }}-pip-
+
+      - name: Install prod & dev dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio
+          pip install -r requirements-dev.txt
+
+      - name: Run linters (ruff + mypy)
+        run: |
+          ruff check .
+          mypy .
 
       - name: Run tests
-        run: pytest -vv
+        run: pytest -vv --cov=bot --cov=.
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ./.coverage
