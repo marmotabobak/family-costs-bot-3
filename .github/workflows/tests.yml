@@ -32,6 +32,7 @@ jobs:
 
     # Переменные окружения для приложения.
     env:
+      BOT_TOKEN: "dummy-token-for-tests"
       DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test_db
 
     steps:
