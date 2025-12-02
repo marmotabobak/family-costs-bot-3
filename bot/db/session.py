@@ -6,7 +6,7 @@ from bot.config import settings
 # Создаём основной объект SQLAlchemy - движок (асинхронный).
 engine = create_async_engine(
     url=settings.database_url,
-    echo=False,
+    echo=settings.debug,
     future=True,  # Новая версия SQLAlchemy 2.x.
 )
 
