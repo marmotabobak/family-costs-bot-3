@@ -63,10 +63,14 @@ jobs:
           mypy .
 
       - name: Run tests
-        run: pytest -vv --cov=bot --cov=.
+        run: pytest -vv --cov=bot --cov=. --cov-report=term --cov-report=xml  --cov-report=html
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
-          path: ./.coverage
+          path: |
+            .coverage
+            coverage.xml
+            htmlcov/
+          overwrite: true
