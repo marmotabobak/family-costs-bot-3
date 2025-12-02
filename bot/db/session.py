@@ -1,18 +1,14 @@
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from bot.config import settings
 
-# Создаём основной объект SQLAlchemy - движок (асинхронный).
 engine = create_async_engine(
-    url=settings.database_url,
+    settings.database_url,
     echo=settings.debug,
-    future=True,  # Новая версия SQLAlchemy 2.x.
+    future=True,
 )
 
-# Фабрика асинхронных сессий: чтобы у каждого запроса была своя независимая сессия
-async_session_maker = sessionmaker(
-    engine=engine,
-    class_=AsyncSession,
+async_session_maker = async_sessionmaker(
+    engine,
     expire_on_commit=False,
 )
