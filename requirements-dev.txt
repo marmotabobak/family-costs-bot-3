@@ -4,4 +4,3 @@ pytest-cov
 mypy
 ruff
 pydantic[mypy]
-

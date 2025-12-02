@@ -1,0 +1,6 @@
+[run]
+omit =
+    */__init__.py
+    */migrations/*
+    */settings.py (если это статический конфиг)
+    */tests/*
