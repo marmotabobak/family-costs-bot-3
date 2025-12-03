@@ -4,3 +4,4 @@ pytest-cov
 mypy
 ruff
 pydantic[mypy]
+alembic>=1.12
