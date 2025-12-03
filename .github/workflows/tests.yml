@@ -1,4 +1,4 @@
-name: Run tests
+name: CI
 
 on:
   push:
@@ -7,7 +7,48 @@ on:
     branches: [ master ]
 
 jobs:
+
+  # ------------------------------------------------------------
+  # 1. Lint + static checks (faster)
+  # ------------------------------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: [ "3.10", "3.11" ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run ruff
+        run: ruff check .
+
+      - name: Run mypy
+        run: mypy .
+
+  # ------------------------------------------------------------
+  # 2. Tests (slower)
+  # ------------------------------------------------------------
   tests:
+    needs: lint
     runs-on: ubuntu-latest
 
     strategy:
@@ -23,58 +64,54 @@ jobs:
           POSTGRES_DB: test_db
         ports:
           - 5432:5432
-        # Настройки healthcheck, чтобы база была готова к запросам.
         options: >-
           --health-cmd="pg_isready -U test"
-          --health-interval=10s
+          --health-interval=5s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
 
-    # Переменные окружения для приложения.
     env:
-      BOT_TOKEN: "dummy-token-for-tests"
+      BOT_TOKEN: dummy-token
       DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test_db
 
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Cache pip packages
+      - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-${{ matrix.python-version }}-
-            ${{ runner.os }}-pip-
 
-      - name: Install prod & dev dependencies
+      - name: Install deps
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run linters (ruff + mypy)
+      - name: Wait for DB to be ready
         run: |
-          ruff check .
-          mypy .
+          for i in {1..15}; do
+            pg_isready -h 127.0.0.1 -p 5432 -U test && break
+            sleep 2
+          done
 
-      - name: Run migrations
+      - name: Apply migrations
         run: alembic upgrade head
 
       - name: Run tests
-        run: pytest -vv --cov=bot --cov=. --cov-report=term --cov-report=xml  --cov-report=html
+        run: pytest -vv --cov=bot --cov-report=xml --cov-report=term --cov-report=html
 
-      - name: Upload coverage report
+      - name: Upload coverage
         uses: actions/upload-artifact@v4
         with:
-          name: coverage-report
+          name: coverage-${{ matrix.python-version }}
           path: |
             .coverage
             coverage.xml
             htmlcov/
-          overwrite: true
