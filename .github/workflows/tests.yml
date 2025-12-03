@@ -63,6 +63,9 @@ jobs:
           ruff check .
           mypy .
 
+      - name: Run migrations
+        run: alembic upgrade head
+
       - name: Run tests
         run: pytest -vv --cov=bot --cov=. --cov-report=term --cov-report=xml  --cov-report=html
 
