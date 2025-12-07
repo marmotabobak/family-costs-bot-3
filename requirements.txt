@@ -3,3 +3,4 @@ asyncpg>=0.29
 greenlet>=2.0
 pydantic-settings>=2.0
 python-dotenv
+aiogram~=3.12
