@@ -8,11 +8,11 @@ router = Router()
 
 @router.message()
 async def echo_and_save(message: Message) -> None:
-    async with get_session() as session:
-        await save_message(
-            session=session,
-            user_id=message.from_user.id,
-            text=message.text or "",
-        )
-
-        await message.answer("Сообщение сохранено!")
+    if message.from_user is not None:
+        async with get_session() as session:
+            await save_message(
+                session=session,
+                user_id=message.from_user.id,
+                text=message.text or "",
+            )
+            await message.answer("Сообщение сохранено!")
