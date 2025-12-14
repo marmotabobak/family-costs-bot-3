@@ -24,8 +24,11 @@ HELP_TEXT = """Формат сообщения:
 
 @router.message(Command("start"))
 async def start(message: Message):
-    await message.answer("Привет! Я бот для учёта расходов.")
-    await message.answer(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
+    await message.answer(
+        "Привет! Я бот для учёта расходов.\n\n" + HELP_TEXT,
+        parse_mode=ParseMode.MARKDOWN,
+    )
+
 
 @router.message(Command("help"))
 async def help_(message: Message):

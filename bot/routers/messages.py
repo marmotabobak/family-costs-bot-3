@@ -1,6 +1,7 @@
 import logging
 
 from aiogram import Router
+from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
 
@@ -19,13 +20,13 @@ async def handle_message(message: Message):
 
     result = parse_message(message.text)
     if result is None:
-        logger.error("Failed to parse message: %r",message.text)
+        logger.warning("Failed to parse message: user_id=%s, text=%r", message.from_user.id, message.text)
         await message.answer("❌ Не удалось распарсить сообщение.")
-        await message.answer(HELP_TEXT)
+        await message.answer(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
         return
 
     async with get_session() as session:
-        for cost in result.costs:
+        for cost in result.valid_lines:
             text = f"{cost.name} {cost.amount}"
             await save_message(
                 session=session,
@@ -33,11 +34,19 @@ async def handle_message(message: Message):
                 text=text,
             )
 
-    if result.invalid_lines:
-        invalid_costs = "\n".join(f"{line}" for line in result.invalid_lines)
-        logger.warning("️Failed to parse costs: %r", invalid_costs)
-        await message.answer(f"⚠️ Не удалось распарсить расходы:\n{invalid_costs}")
+    result_messages = []
 
-    if valid_costs_count := len(result.costs):
-        logger.debug(f"[{valid_costs_count}] costs successfully saved.")
-        await message.answer(f"✅ {valid_costs_count} расходов успешно сохранены.")
+    if result.invalid_lines:
+        logger.info(
+            "Partially parsed message: user_id=%s, invalid_lines=%r",
+            message.from_user.id,
+            result.invalid_lines,
+        )
+        invalid_lines = "\n".join(f"{line}" for line in result.invalid_lines)
+        result_messages.append("⚠️ Не удалось распарсить строки:\n" + invalid_lines)
+
+    logger.debug("%d costs successfully saved", len(result.valid_lines))
+    result_messages.append(f"✅ {len(result.valid_lines)} расходов успешно сохранены.")
+
+    await message.answer("\n\n".join(result_messages))
+

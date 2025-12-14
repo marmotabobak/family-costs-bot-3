@@ -12,7 +12,7 @@ class Cost:
 
 @dataclass(frozen=True)
 class ParseResult:
-    costs: list[Cost]
+    valid_lines: list[Cost]
     invalid_lines: list[str]
 
 MESSAGE_RE = re.compile(r"^\s*(?P<text>.+?)\s+(?P<amount>[+-]?\d+(?:[.,]\d+)?)\s*$")
@@ -31,14 +31,14 @@ def parse_message(message: str | None) -> ParseResult | None:
 
         match = MESSAGE_RE.match(line)
         if not match:
-            logger.warning("Invalid format: %r", raw_line)
+            logger.debug("Invalid format: %r", raw_line)
             invalid_costs.append(raw_line)
             continue
 
         try:
             amount = Decimal(match.group("amount").replace(",", "."))
         except InvalidOperation:
-            logger.warning("Invalid amount: %r", raw_line)
+            logger.debug("Invalid amount: %r", raw_line)
             invalid_costs.append(raw_line)
             continue
 
@@ -48,4 +48,4 @@ def parse_message(message: str | None) -> ParseResult | None:
     if not valid_costs:
         return None
 
-    return ParseResult(costs=valid_costs, invalid_lines=invalid_costs)
+    return ParseResult(valid_lines=valid_costs, invalid_lines=invalid_costs)
