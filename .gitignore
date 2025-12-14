@@ -42,6 +42,7 @@ logs/
 
 # --- Testing artifacts ---
 .coverage
+.coveragerc
 htmlcov/
 dist/
 build/
