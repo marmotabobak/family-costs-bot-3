@@ -3,11 +3,9 @@ from bot.handlers import start, messages
 from aiogram import Bot, Dispatcher
 import asyncio
 import logging
+from bot.logging_config import setup_logging
 
-logging.basicConfig(
-    level=logging.DEBUG,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-)
+setup_logging()
 
 async def main() -> None:
     bot = Bot(token=settings.bot_token)
