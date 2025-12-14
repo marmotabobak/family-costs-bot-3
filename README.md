@@ -125,3 +125,7 @@ pip install -r requirements-dev.txt
 ## Лицензия
 
 MIT
+
+## TODO:
+- склонения (расход/а/ов и др.)
+

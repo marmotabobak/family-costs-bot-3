@@ -1,10 +1,10 @@
-from pip._internal import commands
+import asyncio
+
+from aiogram import Bot, Dispatcher
 
 from bot.config import settings
-from bot.handlers import messages, common
-from aiogram import Bot, Dispatcher
-import asyncio
 from bot.logging_config import setup_logging
+from bot.routers import messages, common
 
 setup_logging()
 
