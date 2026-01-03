@@ -1,0 +1,163 @@
+from decimal import Decimal
+
+from bot.services.message_parser import Cost, ParseResult, parse_message
+
+
+class TestParseMessageReturnsNone:
+    def test_none_input(self):
+        assert parse_message(None) is None
+
+    def test_empty_string(self):
+        assert parse_message("") is None
+
+    def test_whitespace_only(self):
+        assert parse_message("   \n\t\n  ") is None
+
+    def test_no_amount(self):
+        assert parse_message("продукты") is None
+
+
+class TestParseMessageValidSingleLine:
+    def test_simple_integer(self):
+        result = parse_message("Продукты 100")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="Продукты", amount=Decimal("100"))],
+            invalid_lines=[],
+        )
+
+    def test_decimal_with_dot(self):
+        result = parse_message("вода из Лавки 123.56")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="вода из Лавки", amount=Decimal("123.56"))],
+            invalid_lines=[],
+        )
+
+    def test_decimal_with_comma(self):
+        result = parse_message("морковь 123,00")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="морковь", amount=Decimal("123.00"))],
+            invalid_lines=[],
+        )
+
+    def test_negative_amount(self):
+        result = parse_message("корректировка расхода -500.24")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="корректировка расхода", amount=Decimal("-500.24"))],
+            invalid_lines=[],
+        )
+
+    def test_positive_sign(self):
+        result = parse_message("возврат +200")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="возврат", amount=Decimal("200"))],
+            invalid_lines=[],
+        )
+
+    def test_leading_whitespace(self):
+        result = parse_message("   Продукты 100")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="Продукты", amount=Decimal("100"))],
+            invalid_lines=[],
+        )
+
+    def test_trailing_whitespace(self):
+        result = parse_message("Продукты 100   ")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="Продукты", amount=Decimal("100"))],
+            invalid_lines=[],
+        )
+
+    def test_multiple_spaces_between(self):
+        result = parse_message("Продукты    100")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="Продукты", amount=Decimal("100"))],
+            invalid_lines=[],
+        )
+
+
+class TestParseMessageMultipleLines:
+    def test_multiple_valid_lines(self):
+        message = """Продукты 100
+вода 50.5
+хлеб 30"""
+        result = parse_message(message)
+        assert result == ParseResult(
+            valid_lines=[
+                Cost(name="Продукты", amount=Decimal("100")),
+                Cost(name="вода", amount=Decimal("50.5")),
+                Cost(name="хлеб", amount=Decimal("30")),
+            ],
+            invalid_lines=[],
+        )
+
+    def test_with_empty_lines(self):
+        message = """Продукты 100
+
+вода 50"""
+        result = parse_message(message)
+        assert result == ParseResult(
+            valid_lines=[
+                Cost(name="Продукты", amount=Decimal("100")),
+                Cost(name="вода", amount=Decimal("50")),
+            ],
+            invalid_lines=[],
+        )
+
+
+class TestParseMessageMixedLines:
+    def test_valid_and_invalid_lines(self):
+        message = """Продукты 100
+invalid line
+вода 50"""
+        result = parse_message(message)
+        assert result == ParseResult(
+            valid_lines=[
+                Cost(name="Продукты", amount=Decimal("100")),
+                Cost(name="вода", amount=Decimal("50")),
+            ],
+            invalid_lines=["invalid line"],
+        )
+
+    def test_multiple_invalid_lines(self):
+        message = """Продукты 100
+no amount here
+another bad line
+вода 50"""
+        result = parse_message(message)
+        assert result == ParseResult(
+            valid_lines=[
+                Cost(name="Продукты", amount=Decimal("100")),
+                Cost(name="вода", amount=Decimal("50")),
+            ],
+            invalid_lines=["no amount here", "another bad line"],
+        )
+
+
+class TestParseMessageEdgeCases:
+    def test_long_description(self):
+        result = parse_message("заказ из Озона №12345 с доставкой 234")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="заказ из Озона №12345 с доставкой", amount=Decimal("234"))],
+            invalid_lines=[],
+        )
+
+    def test_description_with_numbers(self):
+        result = parse_message("заказ №123 100")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="заказ №123", amount=Decimal("100"))],
+            invalid_lines=[],
+        )
+
+    def test_zero_amount(self):
+        result = parse_message("бесплатно 0")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="бесплатно", amount=Decimal("0"))],
+            invalid_lines=[],
+        )
+
+    def test_large_amount(self):
+        result = parse_message("квартира 10000000.99")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="квартира", amount=Decimal("10000000.99"))],
+            invalid_lines=[],
+        )
