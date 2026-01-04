@@ -208,3 +208,54 @@ class TestTimestamps:
         # Проверяем порядок по времени
         assert msg1.created_at <= msg2.created_at <= msg3.created_at
 
+
+class TestConstraints:
+    """Тесты проверки constraints на таблице messages."""
+
+    @pytest.mark.asyncio
+    async def test_user_id_constraint_rejects_zero(self):
+        """CHECK constraint не позволяет сохранить user_id = 0."""
+        from sqlalchemy.exc import IntegrityError
+
+        async with get_session() as session:
+            with pytest.raises(IntegrityError) as exc_info:
+                await save_message(session, 0, "Invalid user_id")
+
+            # Проверяем что ошибка связана с check constraint
+            assert "check" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_user_id_constraint_rejects_negative(self):
+        """CHECK constraint не позволяет сохранить отрицательный user_id."""
+        from sqlalchemy.exc import IntegrityError
+
+        async with get_session() as session:
+            with pytest.raises(IntegrityError) as exc_info:
+                await save_message(session, -1, "Negative user_id")
+
+            # Проверяем что ошибка связана с check constraint
+            assert "check" in str(exc_info.value).lower()
+
+    @pytest.mark.asyncio
+    async def test_user_id_constraint_allows_positive(self):
+        """CHECK constraint позволяет сохранить положительный user_id."""
+        async with get_session() as session:
+            message = await save_message(session, 123456789, "Valid user_id")
+
+            assert message.id is not None
+            assert message.user_id == 123456789
+
+    @pytest.mark.asyncio
+    async def test_check_constraint_exists_in_schema(self):
+        """CHECK constraint на user_id существует в схеме БД."""
+        async with get_session() as session:
+            stmt = text("""
+                SELECT constraint_name
+                FROM information_schema.check_constraints
+                WHERE constraint_name = 'messages_user_id_positive'
+            """)
+            result = await session.execute(stmt)
+            constraint = result.scalar()
+
+            assert constraint is not None, "CHECK constraint messages_user_id_positive не найден"
+
