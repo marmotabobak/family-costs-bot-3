@@ -67,7 +67,6 @@ heads:
 
 ## Run ruff linter
 lint:
-	ruff check .
 	ruff check . --fix
 	mypy .
 
