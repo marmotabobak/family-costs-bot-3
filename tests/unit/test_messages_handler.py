@@ -40,12 +40,14 @@ class TestHandleMessage:
     @pytest.mark.asyncio
     async def test_db_error_sends_error_message(self, mock_message, mock_session):
         """Если БД полностью недоступна, отправляется сообщение об ошибке."""
+        from sqlalchemy.exc import SQLAlchemyError
+
         with (
             patch("bot.routers.messages.get_session") as mock_get_session,
             patch("bot.routers.messages.save_message") as mock_save,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
-            mock_save.side_effect = Exception("DB error")
+            mock_save.side_effect = SQLAlchemyError("DB error")
 
             await handle_message(mock_message)
 
@@ -112,6 +114,8 @@ class TestHandleMessage:
     @pytest.mark.asyncio
     async def test_partial_save_shows_failed_costs(self, mock_message, mock_session):
         """Частичное сохранение — показывает какие расходы не сохранились."""
+        from sqlalchemy.exc import SQLAlchemyError
+
         mock_message.text = "Продукты 100\nВода 50\nХлеб 30"
 
         with (
@@ -119,8 +123,8 @@ class TestHandleMessage:
             patch("bot.routers.messages.save_message") as mock_save,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
-            # Второй вызов падает с ошибкой
-            mock_save.side_effect = [None, Exception("DB error"), None]
+            # Второй вызов падает с ошибкой БД
+            mock_save.side_effect = [None, SQLAlchemyError("DB error"), None]
 
             await handle_message(mock_message)
 

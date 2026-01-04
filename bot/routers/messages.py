@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
+from sqlalchemy.exc import SQLAlchemyError
 
 from bot.constants import HELP_TEXT, MSG_DB_ERROR, MSG_DB_PARTIAL_ERROR, MSG_INVALID_LINES, MSG_PARSE_ERROR, MSG_SUCCESS
 from bot.db.dependencies import get_session
@@ -40,12 +41,13 @@ async def handle_message(message: Message):
                     text=text,
                 )
                 saved_costs.append(cost)
-            except Exception:
+            except SQLAlchemyError as e:
                 logger.exception(
-                    "Failed to save cost: user_id=%s, cost=%s %s",
+                    "Database error while saving cost: user_id=%s, cost=%s %s, error=%s",
                     message.from_user.id,
                     cost.name,
                     cost.amount,
+                    type(e).__name__,
                 )
                 failed_costs.append(cost)
 
