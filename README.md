@@ -1,5 +1,10 @@
 # Family Costs Bot
 
+[![CI](https://github.com/marmotabobak/family-costs-bot-3/workflows/CI/badge.svg)](https://github.com/marmotabobak/family-costs-bot-3/actions)
+[![codecov](https://codecov.io/gh/marmotabobak/family-costs-bot-3/branch/master/graph/badge.svg)](https://codecov.io/gh/marmotabobak/family-costs-bot-3)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+
 Telegram-бот для учёта семейных расходов. Пользователи отправляют сообщения с расходами, бот парсит их и сохраняет в PostgreSQL.
 
 ## Функциональность
@@ -206,9 +211,9 @@ make logs-db     # только postgres
 ## CI/CD (GitHub Actions)
 
 При push/PR в `master`:
-1. Линтинг (ruff, mypy) на Python 3.10, 3.11
+1. Линтинг (ruff, mypy) на Python 3.10, 3.11, 3.12
 2. Тесты с PostgreSQL
-3. Coverage отчёт
+3. Coverage отчёт (загружается в Codecov)
 
 ## Лицензия
 
