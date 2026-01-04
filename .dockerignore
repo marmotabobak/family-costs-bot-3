@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+*.egg-info/
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# Dev files
+requirements-dev.txt
+tests/
+Makefile
+.pre-commit-config.yaml
+.ruff.toml
+mypy.ini
+.coveragerc
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
