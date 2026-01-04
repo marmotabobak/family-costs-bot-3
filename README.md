@@ -1,6 +1,6 @@
 # Family Costs Bot 3
 
-Telegram-бот для записи пользовательских сообщений в базу данных.  
+Telegram-бот для записи пользовательских сообщений в базу данных.
 Проект использует асинхронный стек Python, PostgreSQL, SQLAlchemy, Alembic и CI/CD на GitHub Actions.
 
 ## Технологии
@@ -102,12 +102,12 @@ pytest --cov=bot --cov-report=term --cov-report=html
 
 При каждом push / pull request в ветку `master`:
 
-- установка зависимостей  
-- запуск линтеров (ruff, mypy)  
-- поднятие PostgreSQL  
-- применение миграций Alembic  
-- запуск тестов  
-- генерация coverage report  
+- установка зависимостей
+- запуск линтеров (ruff, mypy)
+- поднятие PostgreSQL
+- применение миграций Alembic
+- запуск тестов
+- генерация coverage report
 
 Файл workflow:
 
@@ -128,4 +128,3 @@ MIT
 
 ## TODO:
 - склонения (расход/а/ов и др.)
-

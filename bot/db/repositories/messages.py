@@ -1,10 +1,11 @@
 from bot.db.models import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 async def save_message(
-        session: AsyncSession,
-        user_id: int,
-        text: str,
+    session: AsyncSession,
+    user_id: int,
+    text: str,
 ) -> Message:
     """Сохраняет сообщение в БД."""
 

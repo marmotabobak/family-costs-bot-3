@@ -10,6 +10,7 @@ from bot.routers import messages, common
 
 setup_logging()
 
+
 async def main() -> None:
     bot = Bot(
         token=settings.bot_token,
@@ -23,6 +24,7 @@ async def main() -> None:
     dp.include_router(common.router)
 
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

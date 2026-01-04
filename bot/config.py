@@ -1,9 +1,11 @@
 from pydantic_settings import BaseSettings
 from enum import Enum
 
+
 class Environment(str, Enum):
     dev = "dev"
     prod = "prod"
+
 
 class Settings(BaseSettings):
     bot_token: str
@@ -20,5 +22,5 @@ class Settings(BaseSettings):
         "extra": "ignore",
     }
 
-settings = Settings()
 
+settings = Settings()

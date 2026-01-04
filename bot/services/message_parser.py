@@ -5,17 +5,21 @@ from decimal import Decimal, InvalidOperation
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass(frozen=True)
 class Cost:
     name: str
     amount: Decimal
+
 
 @dataclass(frozen=True)
 class ParseResult:
     valid_lines: list[Cost]
     invalid_lines: list[str]
 
+
 MESSAGE_RE = re.compile(r"^\s*(?P<text>.+?)\s+(?P<amount>[+-]?\d+(?:[.,]\d+)?)\s*$")
+
 
 def parse_message(message: str | None) -> ParseResult | None:
     if not message:

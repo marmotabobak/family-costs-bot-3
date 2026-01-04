@@ -14,6 +14,7 @@ from bot.utils import pluralize
 logger = logging.getLogger(__name__)
 router = Router()
 
+
 @router.message(~Command(commands=["start", "help"]))
 async def handle_message(message: Message):
     if not message.text or not message.from_user:
@@ -57,4 +58,3 @@ async def handle_message(message: Message):
     result_messages.append(MSG_SUCCESS.format(count=count, word=word))
 
     await message.answer("\n\n".join(result_messages))
-

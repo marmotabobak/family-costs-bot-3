@@ -1,5 +1,6 @@
 from sqlalchemy.orm import DeclarativeBase
 
+
 class Base(DeclarativeBase):
     """Собственный базовый класс от декларативного базового класса ORM.
 
@@ -9,4 +10,5 @@ class Base(DeclarativeBase):
     - Можно добавлять общие методы/миксины (например timestamps, id и т.д.).
     - Централизованная структура моделей.
     """
+
     pass

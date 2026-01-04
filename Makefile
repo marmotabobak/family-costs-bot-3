@@ -70,6 +70,14 @@ lint:
 	ruff check . --fix
 	mypy .
 
+## Install pre-commit hooks
+hooks:
+	pre-commit install
+
+## Run pre-commit on all files
+pre-commit:
+	pre-commit run --all-files
+
 # -----------------------------------------------------------
 # Testing
 # -----------------------------------------------------------
@@ -118,9 +126,9 @@ help:
 	@echo "  make downgrade     - rollback migration"
 	@echo "  make rev           - show current DB revision"
 	@echo "  make heads         - show heads"
-	@echo "  make lint          - run ruff"
-	@echo "  make format        - format code"
-	@echo "  make types         - run mypy"
+	@echo "  make lint          - run ruff + mypy"
+	@echo "  make hooks         - install pre-commit hooks"
+	@echo "  make pre-commit    - run pre-commit on all files"
 	@echo "  make test          - run pytest"
 	@echo "  make cov           - run tests with coverage"
 	@echo "  make run           - run app"

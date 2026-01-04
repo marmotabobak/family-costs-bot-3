@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, Text, DateTime, func
 from bot.db.base import Base
 
+
 class Message(Base):
     __tablename__ = "messages"
     id = Column(Integer, primary_key=True)
