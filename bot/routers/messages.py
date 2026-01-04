@@ -25,14 +25,19 @@ async def handle_message(message: Message):
         await message.answer(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
         return
 
-    async with get_session() as session:
-        for cost in result.valid_lines:
-            text = f"{cost.name} {cost.amount}"
-            await save_message(
-                session=session,
-                user_id=message.from_user.id,
-                text=text,
-            )
+    try:
+        async with get_session() as session:
+            for cost in result.valid_lines:
+                text = f"{cost.name} {cost.amount}"
+                await save_message(
+                    session=session,
+                    user_id=message.from_user.id,
+                    text=text,
+                )
+    except Exception:
+        logger.exception("Failed to save message: user_id=%s", message.from_user.id)
+        await message.answer("❌ Ошибка сохранения в базу данных.")
+        return
 
     result_messages = []
 
