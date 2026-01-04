@@ -1,25 +1,8 @@
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 import pytest
 
 from bot.constants import MSG_DB_ERROR, MSG_INVALID_LINES, MSG_PARSE_ERROR, MSG_SUCCESS
 from bot.routers.messages import handle_message
-
-
-@pytest.fixture
-def mock_message():
-    """Создаёт мок aiogram Message."""
-    message = AsyncMock()
-    message.text = "Продукты 100"
-    message.from_user = MagicMock()
-    message.from_user.id = 123
-    message.answer = AsyncMock()
-    return message
-
-
-@pytest.fixture
-def mock_session():
-    """Создаёт мок асинхронной сессии БД."""
-    return AsyncMock()
 
 
 class TestHandleMessage:
