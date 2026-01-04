@@ -16,4 +16,6 @@ def mock_message():
 @pytest.fixture
 def mock_session():
     """Создаёт мок асинхронной сессии БД."""
-    return AsyncMock()
+    session = AsyncMock()
+    session.add = MagicMock()
+    return session
