@@ -14,11 +14,16 @@ class TestMain:
             patch("bot.main.Bot") as mock_bot_class,
             patch("bot.main.Dispatcher") as mock_dp_class,
             patch("bot.main.settings") as mock_settings,
+            patch("bot.main.engine") as mock_engine,
         ):
             mock_settings.bot_token = "test-token"
+            mock_bot = MagicMock()
+            mock_bot.session.close = AsyncMock()
+            mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
             mock_dp_class.return_value = mock_dp
+            mock_engine.dispose = AsyncMock()
 
             await main()
 
@@ -30,14 +35,19 @@ class TestMain:
     async def test_includes_routers(self):
         """Подключает роутеры messages и common."""
         with (
-            patch("bot.main.Bot"),
+            patch("bot.main.Bot") as mock_bot_class,
             patch("bot.main.Dispatcher") as mock_dp_class,
             patch("bot.main.messages") as mock_messages,
             patch("bot.main.common") as mock_common,
+            patch("bot.main.engine") as mock_engine,
         ):
+            mock_bot = MagicMock()
+            mock_bot.session.close = AsyncMock()
+            mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
             mock_dp_class.return_value = mock_dp
+            mock_engine.dispose = AsyncMock()
 
             await main()
 
@@ -50,13 +60,38 @@ class TestMain:
         with (
             patch("bot.main.Bot") as mock_bot_class,
             patch("bot.main.Dispatcher") as mock_dp_class,
+            patch("bot.main.engine") as mock_engine,
         ):
             mock_bot = MagicMock()
+            mock_bot.session.close = AsyncMock()
             mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
             mock_dp_class.return_value = mock_dp
+            mock_engine.dispose = AsyncMock()
 
             await main()
 
             mock_dp.start_polling.assert_called_once_with(mock_bot)
+
+    @pytest.mark.asyncio
+    async def test_cleanup_closes_resources(self):
+        """Cleanup закрывает сессию бота и connection pool БД."""
+        with (
+            patch("bot.main.Bot") as mock_bot_class,
+            patch("bot.main.Dispatcher") as mock_dp_class,
+            patch("bot.main.engine") as mock_engine,
+        ):
+            mock_bot = MagicMock()
+            mock_bot.session.close = AsyncMock()
+            mock_bot_class.return_value = mock_bot
+            mock_dp = MagicMock()
+            mock_dp.start_polling = AsyncMock()
+            mock_dp_class.return_value = mock_dp
+            mock_engine.dispose = AsyncMock()
+
+            await main()
+
+            # Проверяем что cleanup был вызван
+            mock_bot.session.close.assert_called()
+            mock_engine.dispose.assert_called_once()
