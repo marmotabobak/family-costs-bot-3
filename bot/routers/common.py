@@ -3,29 +3,15 @@ from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from bot.constants import HELP_TEXT, START_GREETING
+
 router = Router()
 
-HELP_TEXT = """Формат сообщения:
-```
-расход сумма
-расход сумма
-...
-```
-Сумма: целое или вещественное (разделитель . или ,) число.
-Может быть отрицательным (для корректировки).
-
-Примеры:
-- Продукты 100
-- вода из Лавки 123.56
-  морковь 123,00
-  заказ из Озона №12345 234
-  корректировка расхода -500.24
-"""
 
 @router.message(Command("start"))
 async def start(message: Message):
     await message.answer(
-        "Привет! Я бот для учёта расходов.\n\n" + HELP_TEXT,
+        START_GREETING + HELP_TEXT,
         parse_mode=ParseMode.MARKDOWN,
     )
 
