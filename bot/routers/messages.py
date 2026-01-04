@@ -9,6 +9,7 @@ from bot.db.dependencies import get_session
 from bot.db.repositories.messages import save_message
 from bot.routers.common import HELP_TEXT
 from bot.services.message_parser import parse_message
+from bot.utils import pluralize
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -34,8 +35,8 @@ async def handle_message(message: Message):
                     user_id=message.from_user.id,
                     text=text,
                 )
-    except Exception:
-        logger.exception("Failed to save message: user_id=%s", message.from_user.id)
+    except Exception as e:
+        logger.exception("Failed to save message: user_id=%s", message.from_user.id, e)
         await message.answer("❌ Ошибка сохранения в базу данных.")
         return
 
@@ -50,8 +51,10 @@ async def handle_message(message: Message):
         invalid_lines = "\n".join(f"{line}" for line in result.invalid_lines)
         result_messages.append("⚠️ Не удалось распарсить строки:\n" + invalid_lines)
 
-    logger.debug("%d costs successfully saved", len(result.valid_lines))
-    result_messages.append(f"✅ {len(result.valid_lines)} расходов успешно сохранены.")
+    count = len(result.valid_lines)
+    logger.debug("%d costs successfully saved", count)
+    word = pluralize(count, "расход", "расхода", "расходов")
+    result_messages.append(f"✅ {count} {word} успешно сохранено.")
 
     await message.answer("\n\n".join(result_messages))
 
