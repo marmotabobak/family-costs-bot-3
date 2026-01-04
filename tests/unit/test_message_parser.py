@@ -1,4 +1,5 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from unittest.mock import patch
 
 from bot.services.message_parser import Cost, ParseResult, parse_message
 
@@ -160,4 +161,21 @@ class TestParseMessageEdgeCases:
         assert result == ParseResult(
             valid_lines=[Cost(name="квартира", amount=Decimal("10000000.99"))],
             invalid_lines=[],
+        )
+
+
+class TestParseMessageDecimalError:
+    """Тест обработки ошибки InvalidOperation (защитный код)."""
+
+    def test_invalid_decimal_operation(self):
+        """Если Decimal выбросит InvalidOperation, строка попадёт в invalid_lines."""
+        with patch(
+            "bot.services.message_parser.Decimal",
+            side_effect=[InvalidOperation("test"), Decimal("50")],
+        ):
+            result = parse_message("первый 100\nвторой 50")
+
+        assert result == ParseResult(
+            valid_lines=[Cost(name="второй", amount=Decimal("50"))],
+            invalid_lines=["первый 100"],
         )
