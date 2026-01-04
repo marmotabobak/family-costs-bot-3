@@ -103,34 +103,58 @@ ENV=dev
 
 ### 3. Запуск
 
-**Локально:**
+**Локально (для разработки):**
 ```bash
-make up        # Запустить PostgreSQL
+make db        # Запустить только PostgreSQL
 make migrate   # Применить миграции
-make run       # Запустить бота
+make run       # Запустить бота локально
 ```
 
-**Docker:**
+**Docker (всё в контейнерах):**
 ```bash
-docker-compose up --build
+make up        # Запустить postgres + bot
 ```
 
 ## Makefile команды
+
+**Разработка:**
 
 | Команда | Описание |
 |---------|----------|
 | `make deps` | Установить production зависимости |
 | `make deps-dev` | Установить все зависимости |
-| `make up` | Запустить PostgreSQL |
+| `make db` | Запустить только PostgreSQL |
+| `make run` | Запустить бота локально |
+
+**Docker:**
+
+| Команда | Описание |
+|---------|----------|
+| `make up` | Запустить все сервисы (postgres + bot) |
 | `make down` | Остановить контейнеры |
+| `make logs` | Логи всех контейнеров |
+| `make logs-bot` | Логи бота |
+| `make logs-db` | Логи PostgreSQL |
+
+**База данных:**
+
+| Команда | Описание |
+|---------|----------|
 | `make migrate` | Применить миграции |
 | `make migration m="msg"` | Создать миграцию |
+| `make downgrade` | Откатить 1 миграцию |
+| `make db-rev` | Текущая ревизия |
+| `make db-heads` | Доступные heads |
+
+**Качество кода:**
+
+| Команда | Описание |
+|---------|----------|
 | `make lint` | Запустить ruff + mypy |
 | `make hooks` | Установить pre-commit хуки |
 | `make pre-commit` | Запустить pre-commit на всех файлах |
 | `make test` | Запустить тесты |
 | `make cov` | Тесты с coverage отчётом |
-| `make run` | Запустить бота |
 | `make clean` | Очистить кэши |
 
 ## Тестирование
@@ -167,11 +191,16 @@ pytest tests/unit/test_message_parser.py -v
 - `bot` — бот (ждёт готовности postgres)
 
 ```bash
-# Собрать и запустить всё
-docker-compose up --build
+# Запустить всё в Docker
+make up
 
 # Только PostgreSQL (для локальной разработки)
-docker-compose up postgres
+make db
+
+# Просмотр логов
+make logs        # все контейнеры
+make logs-bot    # только бот
+make logs-db     # только postgres
 ```
 
 ## CI/CD (GitHub Actions)

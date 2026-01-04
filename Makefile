@@ -25,17 +25,29 @@ deps-dev:
 	$(PIP) install -r requirements.txt
 	$(PIP) install -r requirements-dev.txt
 
-## Start PostgreSQL locally via Docker
-up:
-	docker-compose up -d
+## Start PostgreSQL only (for local development)
+db:
+	docker-compose up -d postgres
 
-## Stop containers
+## Start all services in Docker (postgres + bot)
+up:
+	docker-compose up -d --build
+
+## Stop all containers
 down:
 	docker-compose down
 
-## Check container logs
+## Follow container logs
 logs:
 	docker-compose logs -f
+
+## Follow bot container logs
+logs-bot:
+	docker-compose logs -f bot
+
+## Follow postgres container logs
+logs-db:
+	docker-compose logs -f postgres
 
 # -----------------------------------------------------------
 # Migrations (Alembic)
@@ -54,11 +66,11 @@ downgrade:
 	alembic downgrade -1
 
 ## Show current Alembic revision
-rev:
+db-rev:
 	alembic current
 
-## Show available heads
-heads:
+## Show available Alembic heads
+db-heads:
 	alembic heads
 
 # -----------------------------------------------------------
@@ -116,21 +128,33 @@ clean:
 help:
 	@echo ""
 	@echo "Available commands:"
-	@echo "  make deps          - install production deps"
-	@echo "  make deps-dev      - install dev deps"
-	@echo "  make up            - start postgres"
-	@echo "  make down          - stop postgres"
-	@echo "  make logs          - follow docker logs"
-	@echo "  make migration m=\"message\" - create alembic migration"
-	@echo "  make migrate       - apply migrations"
-	@echo "  make downgrade     - rollback migration"
-	@echo "  make rev           - show current DB revision"
-	@echo "  make heads         - show heads"
-	@echo "  make lint          - run ruff + mypy"
-	@echo "  make hooks         - install pre-commit hooks"
-	@echo "  make pre-commit    - run pre-commit on all files"
-	@echo "  make test          - run pytest"
-	@echo "  make cov           - run tests with coverage"
-	@echo "  make run           - run app"
-	@echo "  make clean         - cleanup caches"
+	@echo ""
+	@echo "  Development:"
+	@echo "    make deps        - install production deps"
+	@echo "    make deps-dev    - install dev deps"
+	@echo "    make db          - start postgres only (for local dev)"
+	@echo "    make run         - run bot locally"
+	@echo ""
+	@echo "  Docker:"
+	@echo "    make up          - start all services (postgres + bot)"
+	@echo "    make down        - stop all containers"
+	@echo "    make logs        - follow all container logs"
+	@echo "    make logs-bot    - follow bot logs"
+	@echo "    make logs-db     - follow postgres logs"
+	@echo ""
+	@echo "  Database:"
+	@echo "    make migrate     - apply migrations"
+	@echo "    make migration m=\"msg\" - create migration"
+	@echo "    make downgrade   - rollback 1 migration"
+	@echo "    make db-rev      - show current revision"
+	@echo "    make db-heads    - show available heads"
+	@echo ""
+	@echo "  Quality:"
+	@echo "    make lint        - run ruff + mypy"
+	@echo "    make hooks       - install pre-commit hooks"
+	@echo "    make pre-commit  - run pre-commit on all files"
+	@echo "    make test        - run pytest"
+	@echo "    make cov         - run tests with coverage"
+	@echo ""
+	@echo "    make clean       - cleanup caches"
 	@echo ""
