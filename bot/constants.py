@@ -21,5 +21,6 @@ START_GREETING = "Привет! Я бот для учёта расходов.\n\
 
 MSG_PARSE_ERROR = "❌ Не удалось распарсить сообщение."
 MSG_DB_ERROR = "❌ Ошибка сохранения в базу данных."
+MSG_DB_PARTIAL_ERROR = "⚠️ Не удалось сохранить следующие расходы:\n{lines}"
 MSG_INVALID_LINES = "⚠️ Не удалось распарсить строки:\n{lines}"
 MSG_SUCCESS = "✅ {count} {word} успешно сохранено."
