@@ -560,3 +560,52 @@ class TestPastModeE2E:
                 assert msg.created_at.year == 2024
                 assert msg.created_at.month == 1
                 assert msg.created_at.day == 1
+
+    @pytest.mark.asyncio
+    async def test_past_mode_enable_then_immediately_disable(self):
+        """
+        Сценарий: включение режима → сразу отключение → ввод на сегодня.
+        
+        1. Включаем режим прошлого (Июнь 2024)
+        2. Сразу отключаем режим (без ввода расходов)
+        3. Вводим расход → записывается на сегодня
+        """
+        from datetime import datetime, timezone
+        from bot.routers.menu import handle_enter_past_month, handle_disable_past
+
+        user_id = 88885
+        mock_state = MockState()
+
+        # Шаг 1: Включаем режим прошлого (Июнь 2024)
+        mock_callback1 = create_mock_callback(user_id=user_id, data="enter_past_month:2024:6")
+        await handle_enter_past_month(mock_callback1, mock_state)
+
+        # Проверяем что режим включён
+        assert mock_state._data.get("past_mode_year") == 2024
+        assert mock_state._data.get("past_mode_month") == 6
+
+        # Шаг 2: Сразу отключаем режим (без ввода расходов!)
+        mock_callback2 = create_mock_callback(user_id=user_id, data="disable_past")
+        await handle_disable_past(mock_callback2, mock_state)
+
+        # Проверяем что режим выключен
+        assert mock_state._data.get("past_mode_year") is None
+        assert mock_state._data.get("past_mode_month") is None
+
+        # Шаг 3: Вводим расход — должен записаться на сегодня
+        mock_message = MockMessage("Продукты сегодня 100", user_id=user_id)
+        await handle_message(mock_message, mock_state)
+
+        # Проверяем что записалось на сегодня
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 1
+
+            today = datetime.now(timezone.utc)
+            assert messages[0].text == "Продукты сегодня 100"
+            assert messages[0].created_at.year == today.year
+            assert messages[0].created_at.month == today.month
+            assert messages[0].created_at.day == today.day
