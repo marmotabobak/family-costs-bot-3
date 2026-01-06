@@ -121,39 +121,6 @@ class TestHandleMessageE2E:
         assert "Не удалось распарсить сообщение" in mock_message.answers[0]["text"]
 
     @pytest.mark.asyncio
-    async def test_mixed_valid_invalid_lines_asks_confirmation(self):
-        """Частично валидное сообщение запрашивает подтверждение."""
-        mock_message = MockMessage(
-            "Продукты 100\ninvalid line\nВода 50",
-            user_id=11111,
-        )
-        mock_state = MockState()
-
-        await handle_message(mock_message, mock_state)
-
-        # Ничего не должно быть сохранено до подтверждения
-        async with get_session() as session:
-            stmt = select(Message).where(Message.user_id == 11111)
-            result = await session.execute(stmt)
-            messages = result.scalars().all()
-
-            assert len(messages) == 0
-
-        # Проверяем что запрошено подтверждение
-        assert len(mock_message.answers) == 1
-        response = mock_message.answers[0]["text"]
-        assert "Не удалось распознать строки" in response
-        assert "invalid line" in response
-        assert "Записать" in response
-
-        # Проверяем что есть клавиатура
-        assert "reply_markup" in mock_message.answers[0]["kwargs"]
-
-        # Проверяем что state установлен
-        assert mock_state._state is not None
-        assert len(mock_state._data.get("valid_costs", [])) == 2
-
-    @pytest.mark.asyncio
     async def test_no_text_does_not_crash(self):
         """Сообщение без текста не вызывает ошибку."""
         mock_message = MockMessage("", user_id=22222)
@@ -224,3 +191,124 @@ class TestHandleMessageE2E:
             assert message.text == "Молоко 123.45"
 
         assert len(mock_message.answers) == 1
+
+
+def create_mock_callback(user_id: int, data: str):
+    """Создаёт мок CallbackQuery с правильными типами."""
+    from unittest.mock import AsyncMock, MagicMock
+    from aiogram.types import CallbackQuery, Message as AiogramMessage
+
+    mock_message = MagicMock(spec=AiogramMessage)
+    mock_message.edit_text = AsyncMock()
+
+    mock_callback = MagicMock(spec=CallbackQuery)
+    mock_callback.from_user = MockUser(user_id)
+    mock_callback.data = data
+    mock_callback.message = mock_message
+    mock_callback.answer = AsyncMock()
+
+    return mock_callback
+
+
+class TestConfirmationE2E:
+    """E2E тесты подтверждения/отмены записи с реальной БД."""
+
+    @pytest.mark.asyncio
+    async def test_confirm_saves_valid_costs_to_db(self):
+        """При подтверждении валидные расходы записываются в БД."""
+        from bot.routers.messages import handle_confirm_save
+
+        user_id = 66666
+        mock_message = MockMessage(
+            "Продукты 100\ninvalid line\nВода 50",
+            user_id=user_id,
+        )
+        mock_state = MockState()
+
+        # Шаг 1: отправляем сообщение с невалидными строками
+        await handle_message(mock_message, mock_state)
+
+        # Проверяем что ничего не сохранено до подтверждения
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            assert len(messages) == 0
+
+        # Проверяем что запрошено подтверждение с правильным содержимым
+        assert len(mock_message.answers) == 1
+        response = mock_message.answers[0]["text"]
+        assert "Не удалось распознать строки" in response
+        assert "invalid line" in response
+        assert "Записать" in response
+        assert "reply_markup" in mock_message.answers[0]["kwargs"]
+
+        # Проверяем что state установлен корректно
+        assert mock_state._state is not None
+        assert len(mock_state._data.get("valid_costs", [])) == 2
+
+        # Шаг 2: подтверждаем сохранение
+        mock_callback = create_mock_callback(user_id=user_id, data="confirm_save")
+
+        await handle_confirm_save(mock_callback, mock_state)
+
+        # Проверяем что валидные расходы сохранены в БД
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id).order_by(Message.id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 2
+            assert messages[0].text == "Продукты 100"
+            assert messages[1].text == "Вода 50"
+
+        # Проверяем ответ
+        mock_callback.answer.assert_called_once()
+        mock_callback.message.edit_text.assert_called_once()
+        edited_text = mock_callback.message.edit_text.call_args[0][0]
+        assert "успешно сохранено" in edited_text
+
+    @pytest.mark.asyncio
+    async def test_cancel_does_not_save_to_db(self):
+        """При отмене ничего не записывается в БД."""
+        from bot.routers.messages import handle_cancel_save
+
+        user_id = 77777
+        mock_message = MockMessage(
+            "Продукты 100\ninvalid line\nВода 50",
+            user_id=user_id,
+        )
+        mock_state = MockState()
+
+        # Шаг 1: отправляем сообщение с невалидными строками
+        await handle_message(mock_message, mock_state)
+
+        # Проверяем что ничего не сохранено
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            assert len(messages) == 0
+
+        # Шаг 2: отменяем сохранение
+        mock_callback = create_mock_callback(user_id=user_id, data="cancel_save")
+
+        await handle_cancel_save(mock_callback, mock_state)
+
+        # Проверяем что ничего не сохранено в БД
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 0
+
+        # Проверяем что state очищен
+        assert mock_state._state is None
+        assert mock_state._data == {}
+
+        # Проверяем ответ
+        mock_callback.answer.assert_called_once()
+        mock_callback.message.edit_text.assert_called_once()
+        edited_text = mock_callback.message.edit_text.call_args[0][0]
+        assert "отменено" in edited_text.lower()
