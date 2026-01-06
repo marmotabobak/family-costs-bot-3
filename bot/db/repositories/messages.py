@@ -1,7 +1,82 @@
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Message
+
+
+@dataclass
+class UserCostsStats:
+    """Статистика расходов пользователя."""
+
+    total_amount: Decimal
+    count: int
+    first_date: datetime | None
+    last_date: datetime | None
+
+
+async def get_user_costs_stats(session: AsyncSession, user_id: int) -> UserCostsStats:
+    """Возвращает статистику расходов пользователя."""
+    result = await session.execute(
+        select(Message.text, Message.created_at)
+        .where(Message.user_id == user_id)
+        .order_by(Message.created_at)
+    )
+    rows = result.all()
+
+    if not rows:
+        return UserCostsStats(
+            total_amount=Decimal("0"),
+            count=0,
+            first_date=None,
+            last_date=None,
+        )
+
+    total = Decimal("0")
+    for row in rows:
+        # Текст в формате "название сумма", берём последнее слово как сумму
+        parts = row.text.rsplit(maxsplit=1)
+        if len(parts) == 2:
+            try:
+                amount = Decimal(parts[1].replace(",", "."))
+                total += amount
+            except Exception:
+                pass
+
+    return UserCostsStats(
+        total_amount=total,
+        count=len(rows),
+        first_date=rows[0].created_at,
+        last_date=rows[-1].created_at,
+    )
+
+
+async def get_user_recent_costs(
+    session: AsyncSession, user_id: int, limit: int = 10
+) -> list[tuple[str, Decimal, datetime]]:
+    """Возвращает последние расходы пользователя (название, сумма, дата)."""
+    result = await session.execute(
+        select(Message.text, Message.created_at)
+        .where(Message.user_id == user_id)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+    )
+    rows = result.all()
+
+    costs = []
+    for row in rows:
+        parts = row.text.rsplit(maxsplit=1)
+        if len(parts) == 2:
+            try:
+                amount = Decimal(parts[1].replace(",", "."))
+                costs.append((parts[0], amount, row.created_at))
+            except Exception:
+                pass
+
+    return costs
 
 
 async def get_unique_user_ids(session: AsyncSession) -> list[int]:

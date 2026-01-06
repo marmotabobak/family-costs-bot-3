@@ -5,6 +5,7 @@ import signal
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 
 from bot.config import settings
 from bot.db.session import engine
@@ -43,6 +44,13 @@ async def main() -> None:
             sig,
             lambda s=sig: signal_handler(s),  # type: ignore[misc]
         )
+
+    # Устанавливаем команды бота для меню
+    await bot.set_my_commands([
+        BotCommand(command="start", description="Начать работу с ботом"),
+        BotCommand(command="menu", description="Показать меню расходов"),
+        BotCommand(command="help", description="Справка по формату сообщений"),
+    ])
 
     logger.info("Bot started. Press Ctrl+C to stop.")
 
