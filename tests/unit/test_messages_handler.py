@@ -1,3 +1,4 @@
+from datetime import timezone
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +11,8 @@ from bot.routers.messages import (
     SaveCostsStates,
     build_confirmation_keyboard,
     format_confirmation_message,
+    format_past_mode_info,
+    get_past_mode_date,
     handle_cancel_save,
     handle_confirm_save,
     handle_message,
@@ -114,6 +117,7 @@ class TestHandleMessage:
                 session=mock_session,
                 user_id=123,
                 text="Продукты 100",
+                created_at=None,  # По умолчанию - текущая дата
             )
 
     @pytest.mark.asyncio
@@ -231,7 +235,9 @@ class TestHandleConfirmSave:
             await handle_confirm_save(callback, mock_state)
 
             mock_save.assert_called_once()
-            mock_state.clear.assert_called_once()
+            # Теперь вместо clear() используется set_state(None) + update_data()
+            mock_state.set_state.assert_called_with(None)
+            mock_state.update_data.assert_called()
             callback.message.edit_text.assert_called_once()
 
     @pytest.mark.asyncio
@@ -282,3 +288,139 @@ class TestHandleCancelSave:
         callback.message.edit_text.assert_called_once()
         message = callback.message.edit_text.call_args[0][0]
         assert "отменено" in message.lower()
+
+
+# ========== Тесты для режима ввода расходов в прошлое ==========
+
+
+class TestGetPastModeDate:
+    """Тесты функции получения даты режима ввода в прошлое."""
+
+    def test_returns_none_when_no_data(self):
+        """Возвращает None если данных нет."""
+        result = get_past_mode_date({})
+        assert result is None
+
+    def test_returns_none_when_partial_data(self):
+        """Возвращает None если данные неполные."""
+        assert get_past_mode_date({"past_mode_year": 2024}) is None
+        assert get_past_mode_date({"past_mode_month": 6}) is None
+
+    def test_returns_first_day_of_month(self):
+        """Возвращает 1-е число указанного месяца."""
+        result = get_past_mode_date({"past_mode_year": 2024, "past_mode_month": 6})
+
+        assert result is not None
+        assert result.year == 2024
+        assert result.month == 6
+        assert result.day == 1
+        assert result.tzinfo == timezone.utc
+
+
+class TestFormatPastModeInfo:
+    """Тесты форматирования информации о режиме."""
+
+    def test_contains_month_and_year(self):
+        """Содержит месяц и год."""
+        result = format_past_mode_info(2024, 6)
+
+        assert "Июнь" in result
+        assert "2024" in result
+
+    def test_contains_recorded_prefix(self):
+        """Содержит информацию о записи."""
+        result = format_past_mode_info(2024, 1)
+
+        assert "Записано" in result
+
+
+class TestHandleMessageWithPastMode:
+    """Тесты обработчика сообщений в режиме ввода в прошлое."""
+
+    @pytest.fixture
+    def mock_message(self):
+        """Мок сообщения."""
+        from aiogram.types import Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.text = "Продукты 100"
+        msg.from_user = user
+        msg.answer = AsyncMock()
+
+        return msg
+
+    @pytest.fixture
+    def mock_state_with_past_mode(self):
+        """Мок FSMContext с активным режимом ввода в прошлое."""
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={
+            "past_mode_year": 2024,
+            "past_mode_month": 6,
+        })
+        state.set_state = AsyncMock()
+        state.update_data = AsyncMock()
+        return state
+
+    @pytest.fixture
+    def mock_session(self):
+        """Мок сессии БД."""
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        return session
+
+    @pytest.mark.asyncio
+    async def test_saves_with_past_date(self, mock_message, mock_state_with_past_mode, mock_session):
+        """Сохраняет расходы с датой из режима."""
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.save_message") as mock_save,
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+
+            await handle_message(mock_message, mock_state_with_past_mode)
+
+            # Проверяем что save_message вызван с кастомной датой
+            mock_save.assert_called_once()
+            call_kwargs = mock_save.call_args.kwargs
+            assert call_kwargs["created_at"] is not None
+            assert call_kwargs["created_at"].year == 2024
+            assert call_kwargs["created_at"].month == 6
+            assert call_kwargs["created_at"].day == 1
+
+    @pytest.mark.asyncio
+    async def test_response_includes_past_mode_info(self, mock_message, mock_state_with_past_mode, mock_session):
+        """Ответ содержит информацию о записи в прошлое."""
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.save_message"),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+
+            await handle_message(mock_message, mock_state_with_past_mode)
+
+            mock_message.answer.assert_called_once()
+            call_args = mock_message.answer.call_args
+
+            response = call_args[0][0]
+            assert "Июнь 2024" in response
+
+            # Проверяем что есть кнопка "Отключить прошлое"
+            assert "reply_markup" in call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_normal_mode_saves_without_date(self, mock_message, mock_state, mock_session):
+        """В обычном режиме сохраняет без кастомной даты."""
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.save_message") as mock_save,
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+
+            await handle_message(mock_message, mock_state)
+
+            mock_save.assert_called_once()
+            call_kwargs = mock_save.call_args.kwargs
+            assert call_kwargs["created_at"] is None

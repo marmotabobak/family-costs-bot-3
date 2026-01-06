@@ -7,18 +7,28 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bot.routers.menu import (
+    CALLBACK_DISABLE_PAST,
+    CALLBACK_ENTER_PAST,
+    CALLBACK_ENTER_PAST_MONTH,
+    CALLBACK_ENTER_PAST_YEAR,
+    CALLBACK_MONTH_PREFIX,
     CALLBACK_MY_COSTS,
     CALLBACK_PERIOD_PREFIX,
     CALLBACK_USER_COSTS_PREFIX,
-    CALLBACK_MONTH_PREFIX,
+    build_disable_past_keyboard,
     build_menu_keyboard,
-    build_period_keyboard,
     build_months_keyboard,
+    build_past_months_keyboard,
+    build_past_years_keyboard,
+    build_period_keyboard,
     format_month_report,
-    handle_my_costs,
-    handle_user_costs,
-    handle_period_selection,
+    handle_disable_past,
+    handle_enter_past,
+    handle_enter_past_month,
     handle_month_selection,
+    handle_my_costs,
+    handle_period_selection,
+    handle_user_costs,
     menu_command,
 )
 
@@ -58,9 +68,17 @@ class TestBuildMenuKeyboard:
 class TestBuildPeriodKeyboard:
     """Тесты построения меню выбора периода."""
 
-    def test_has_three_buttons(self):
-        """Клавиатура содержит три кнопки периодов."""
+    def test_has_four_buttons_for_own(self):
+        """Клавиатура содержит 4 кнопки для своих расходов (3 периода + ввод за другой месяц)."""
         keyboard = build_period_keyboard(user_id=123, is_own=True)
+
+        assert len(keyboard.inline_keyboard) == 4
+        # Последняя кнопка — "Внести расходы за другой месяц"
+        assert "Внести расходы за другой месяц" in keyboard.inline_keyboard[3][0].text
+
+    def test_has_three_buttons_for_other(self):
+        """Клавиатура содержит 3 кнопки для чужих расходов (без ввода за другой месяц)."""
+        keyboard = build_period_keyboard(user_id=123, is_own=False)
 
         assert len(keyboard.inline_keyboard) == 3
 
@@ -378,3 +396,225 @@ class TestHandleMonthSelection:
 
             response = callback.message.answer.call_args[0][0]
             assert "Январь 2024" in response
+
+
+# ========== Тесты для ввода расходов за другой месяц ==========
+
+
+class TestBuildPastYearsKeyboard:
+    """Тесты построения меню выбора года для ввода в прошлое."""
+
+    def test_has_two_years(self):
+        """Клавиатура содержит текущий и прошлый год."""
+        keyboard = build_past_years_keyboard()
+
+        assert len(keyboard.inline_keyboard) == 2
+
+    def test_callback_data_format(self):
+        """Проверка формата callback_data."""
+        keyboard = build_past_years_keyboard()
+
+        for row in keyboard.inline_keyboard:
+            assert row[0].callback_data.startswith(CALLBACK_ENTER_PAST_YEAR)
+
+
+class TestBuildPastMonthsKeyboard:
+    """Тесты построения меню выбора месяца для ввода в прошлое."""
+
+    def test_past_year_shows_all_months(self):
+        """Для прошлого года показываются все 12 месяцев."""
+        from datetime import datetime
+        past_year = datetime.now().year - 1
+
+        keyboard = build_past_months_keyboard(past_year)
+
+        # Подсчитываем общее количество кнопок во всех рядах
+        total_buttons = sum(len(row) for row in keyboard.inline_keyboard)
+        assert total_buttons == 12
+
+    def test_current_year_shows_only_past_months(self):
+        """Для текущего года показываются только прошлые месяцы."""
+        from datetime import datetime
+        current_year = datetime.now().year
+        current_month = datetime.now().month
+
+        keyboard = build_past_months_keyboard(current_year)
+
+        total_buttons = sum(len(row) for row in keyboard.inline_keyboard)
+        # Должно быть current_month - 1 кнопок (не включая текущий месяц)
+        assert total_buttons == current_month - 1
+
+    def test_callback_data_format(self):
+        """Проверка формата callback_data."""
+        keyboard = build_past_months_keyboard(2024)
+
+        for row in keyboard.inline_keyboard:
+            for btn in row:
+                assert btn.callback_data.startswith(CALLBACK_ENTER_PAST_MONTH)
+                assert "2024:" in btn.callback_data
+
+
+class TestBuildDisablePastKeyboard:
+    """Тесты построения кнопки отключения режима."""
+
+    def test_has_one_button(self):
+        """Клавиатура содержит одну кнопку."""
+        keyboard = build_disable_past_keyboard()
+
+        assert len(keyboard.inline_keyboard) == 1
+        assert len(keyboard.inline_keyboard[0]) == 1
+
+    def test_callback_data(self):
+        """Проверка callback_data."""
+        keyboard = build_disable_past_keyboard()
+
+        assert keyboard.inline_keyboard[0][0].callback_data == CALLBACK_DISABLE_PAST
+
+    def test_button_text(self):
+        """Проверка текста кнопки."""
+        keyboard = build_disable_past_keyboard()
+
+        assert "Отключить прошлое" in keyboard.inline_keyboard[0][0].text
+
+
+class TestHandleEnterPast:
+    """Тесты обработчика начала ввода в прошлое."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.answer = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = CALLBACK_ENTER_PAST
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_shows_year_selection(self, callback):
+        """Показывает выбор года."""
+        await handle_enter_past(callback)
+
+        callback.answer.assert_called_once()
+        callback.message.answer.assert_called_once()
+
+        call_args = callback.message.answer.call_args
+        assert "Выберите год" in call_args[0][0]
+        assert "reply_markup" in call_args.kwargs
+
+
+class TestHandleEnterPastMonth:
+    """Тесты обработчика выбора месяца для ввода в прошлое."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.answer = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = f"{CALLBACK_ENTER_PAST_MONTH}2024:6"
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.fixture
+    def mock_state(self):
+        """Фикстура FSMContext."""
+        state = AsyncMock()
+        state.update_data = AsyncMock()
+        return state
+
+    @pytest.mark.asyncio
+    async def test_enables_past_mode(self, callback, mock_state):
+        """Включает режим ввода в прошлое."""
+        await handle_enter_past_month(callback, mock_state)
+
+        callback.answer.assert_called_once()
+        callback.message.answer.assert_called_once()
+
+        # Проверяем что режим сохранён в FSM
+        mock_state.update_data.assert_called_once_with(past_mode_year=2024, past_mode_month=6)
+
+    @pytest.mark.asyncio
+    async def test_shows_warning_message(self, callback, mock_state):
+        """Показывает предупреждающее сообщение."""
+        await handle_enter_past_month(callback, mock_state)
+
+        response = callback.message.answer.call_args[0][0]
+        assert "Внимание" in response
+        assert "Июнь 2024" in response
+        assert "1-е число" in response
+
+
+class TestHandleDisablePast:
+    """Тесты обработчика отключения режима ввода в прошлое."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.edit_text = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = CALLBACK_DISABLE_PAST
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.fixture
+    def mock_state(self):
+        """Фикстура FSMContext."""
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={
+            "past_mode_year": 2024,
+            "past_mode_month": 6,
+        })
+        state.set_data = AsyncMock()
+        return state
+
+    @pytest.mark.asyncio
+    async def test_disables_past_mode(self, callback, mock_state):
+        """Отключает режим ввода в прошлое."""
+        await handle_disable_past(callback, mock_state)
+
+        callback.answer.assert_called_once()
+        mock_state.set_data.assert_called_once()
+
+        # Проверяем что past_mode_* удалены из данных
+        new_data = mock_state.set_data.call_args[0][0]
+        assert "past_mode_year" not in new_data
+        assert "past_mode_month" not in new_data
+
+    @pytest.mark.asyncio
+    async def test_shows_confirmation_message(self, callback, mock_state):
+        """Показывает подтверждающее сообщение."""
+        await handle_disable_past(callback, mock_state)
+
+        callback.message.edit_text.assert_called_once()
+        response = callback.message.edit_text.call_args[0][0]
+        assert "Прошлое ушло" in response
+        assert "сегодня" in response

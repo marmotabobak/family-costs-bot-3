@@ -142,16 +142,27 @@ async def save_message(
     session: AsyncSession,
     user_id: int,
     text: str,
+    created_at: datetime | None = None,
 ) -> Message:
     """Создает объект сообщения без commit (для batch операций).
     
     Вызывающий код должен сам делать commit.
     Это позволяет сохранять несколько сообщений атомарно в одной транзакции.
+    
+    Args:
+        session: сессия БД
+        user_id: ID пользователя Telegram
+        text: текст расхода
+        created_at: опциональная дата создания (по умолчанию - текущее время)
     """
     message = Message(
         user_id=user_id,
         text=text,
     )
+    
+    # Если передана кастомная дата - устанавливаем её
+    if created_at is not None:
+        message.created_at = created_at  # type: ignore[assignment]
 
     session.add(message)
     await session.flush()  # Получаем id и created_at без commit

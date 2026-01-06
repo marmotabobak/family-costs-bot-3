@@ -1,5 +1,6 @@
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from aiogram import F, Router
 from aiogram.enums import ParseMode
@@ -15,12 +16,19 @@ from bot.db.repositories.messages import save_message
 from bot.services.message_parser import Cost, parse_message
 from bot.utils import pluralize
 
+# Названия месяцев (дублируем из menu.py для независимости)
+MONTH_NAMES = [
+    "", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+    "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"
+]
+
 logger = logging.getLogger(__name__)
 router = Router()
 
 # Callback data для подтверждения
 CALLBACK_CONFIRM_SAVE = "confirm_save"
 CALLBACK_CANCEL_SAVE = "cancel_save"
+CALLBACK_DISABLE_PAST = "disable_past"  # отключить режим ввода в прошлое
 
 
 class SaveCostsStates(StatesGroup):
@@ -47,6 +55,13 @@ def build_confirmation_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def build_disable_past_keyboard() -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру с кнопкой 'Отключить прошлое'."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏹️ Отключить прошлое", callback_data=CALLBACK_DISABLE_PAST)]
+    ])
+
+
 def format_confirmation_message(valid_costs: list[Cost], invalid_lines: list[str]) -> str:
     """Форматирует сообщение с запросом подтверждения."""
     lines = ["⚠️ *Не удалось распознать строки:*", ""]
@@ -69,8 +84,18 @@ def format_confirmation_message(valid_costs: list[Cost], invalid_lines: list[str
     return "\n".join(lines)
 
 
-async def save_costs_to_db(user_id: int, costs: list[Cost]) -> bool:
-    """Сохраняет расходы в БД. Возвращает True при успехе."""
+async def save_costs_to_db(
+    user_id: int,
+    costs: list[Cost],
+    created_at: datetime | None = None,
+) -> bool:
+    """Сохраняет расходы в БД. Возвращает True при успехе.
+    
+    Args:
+        user_id: ID пользователя Telegram
+        costs: список расходов
+        created_at: опциональная дата создания (для режима ввода в прошлое)
+    """
     async with get_session() as session:
         try:
             for cost in costs:
@@ -79,6 +104,7 @@ async def save_costs_to_db(user_id: int, costs: list[Cost]) -> bool:
                     session=session,
                     user_id=user_id,
                     text=text,
+                    created_at=created_at,
                 )
             await session.commit()
             return True
@@ -90,6 +116,23 @@ async def save_costs_to_db(user_id: int, costs: list[Cost]) -> bool:
             )
             await session.rollback()
             return False
+
+
+def get_past_mode_date(state_data: dict) -> datetime | None:
+    """Получает дату из режима ввода в прошлое (1-е число месяца)."""
+    year = state_data.get("past_mode_year")
+    month = state_data.get("past_mode_month")
+    
+    if year is not None and month is not None:
+        return datetime(year, month, 1, 12, 0, 0, tzinfo=timezone.utc)
+    
+    return None
+
+
+def format_past_mode_info(year: int, month: int) -> str:
+    """Форматирует информацию о режиме ввода в прошлое."""
+    month_name = MONTH_NAMES[month]
+    return f"\n\n📅 _Записано на {month_name} {year}_"
 
 
 @router.message(~Command(commands=["start", "help", "menu"]))
@@ -105,6 +148,12 @@ async def handle_message(message: Message, state: FSMContext):
         await message.answer(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
         return
 
+    # Получаем данные о режиме ввода в прошлое
+    state_data = await state.get_data()
+    past_mode_date = get_past_mode_date(state_data)
+    past_mode_year = state_data.get("past_mode_year")
+    past_mode_month = state_data.get("past_mode_month")
+
     # Если есть невалидные строки - запрашиваем подтверждение
     if result.invalid_lines:
         logger.info(
@@ -114,7 +163,7 @@ async def handle_message(message: Message, state: FSMContext):
             len(result.invalid_lines),
         )
 
-        # Сохраняем данные в FSM
+        # Сохраняем данные в FSM (сохраняем past_mode_*)
         await state.set_state(SaveCostsStates.waiting_confirmation)
         await state.update_data(
             valid_costs=[{"name": c.name, "amount": str(c.amount)} for c in result.valid_lines],
@@ -128,13 +177,26 @@ async def handle_message(message: Message, state: FSMContext):
         return
 
     # Все строки валидные - сохраняем сразу
-    success = await save_costs_to_db(message.from_user.id, result.valid_lines)
+    success = await save_costs_to_db(
+        message.from_user.id,
+        result.valid_lines,
+        created_at=past_mode_date,
+    )
 
     if success:
         count = len(result.valid_lines)
         logger.info("Successfully saved %d costs: user_id=%s", count, message.from_user.id)
         word = pluralize(count, "расход", "расхода", "расходов")
-        await message.answer(MSG_SUCCESS.format(count=count, word=word))
+        
+        response_text = MSG_SUCCESS.format(count=count, word=word)
+        
+        # Если активен режим ввода в прошлое - добавляем информацию и кнопку
+        if past_mode_year and past_mode_month:
+            response_text += format_past_mode_info(past_mode_year, past_mode_month)
+            keyboard = build_disable_past_keyboard()
+            await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+        else:
+            await message.answer(response_text)
     else:
         await message.answer(MSG_DB_ERROR)
 
@@ -153,24 +215,42 @@ async def handle_confirm_save(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         return
 
+    # Получаем данные о режиме ввода в прошлое
+    past_mode_date = get_past_mode_date(data)
+    past_mode_year = data.get("past_mode_year")
+    past_mode_month = data.get("past_mode_month")
+
     # Восстанавливаем объекты Cost
     from decimal import Decimal
     valid_costs = [Cost(name=c["name"], amount=Decimal(c["amount"])) for c in valid_costs_data]
 
     # Сохраняем в БД
-    success = await save_costs_to_db(callback.from_user.id, valid_costs)
+    success = await save_costs_to_db(
+        callback.from_user.id,
+        valid_costs,
+        created_at=past_mode_date,
+    )
 
-    await state.clear()
+    # Очищаем только состояние подтверждения, сохраняем past_mode_*
+    await state.set_state(None)
+    await state.update_data(valid_costs=None, invalid_lines=None)
 
     if success:
         count = len(valid_costs)
         logger.info("User %s confirmed saving %d costs", callback.from_user.id, count)
         word = pluralize(count, "расход", "расхода", "расходов")
-        await callback.answer()
-        await callback.message.edit_text(
-            f"✅ {MSG_SUCCESS.format(count=count, word=word)}",
-            reply_markup=None,
-        )
+        
+        response_text = f"✅ {MSG_SUCCESS.format(count=count, word=word)}"
+        
+        # Если активен режим ввода в прошлое - добавляем информацию и кнопку
+        if past_mode_year and past_mode_month:
+            response_text += format_past_mode_info(past_mode_year, past_mode_month)
+            keyboard = build_disable_past_keyboard()
+            await callback.answer()
+            await callback.message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
+        else:
+            await callback.answer()
+            await callback.message.edit_text(response_text, reply_markup=None)
     else:
         await callback.answer()
         await callback.message.edit_text(MSG_DB_ERROR, reply_markup=None)

@@ -47,6 +47,10 @@ class MockState:
     async def get_data(self):
         return self._data
 
+    async def set_data(self, data):
+        """Устанавливает данные напрямую (заменяет существующие)."""
+        self._data = data
+
     async def clear(self):
         self._state = None
         self._data = {}
@@ -200,6 +204,7 @@ def create_mock_callback(user_id: int, data: str):
 
     mock_message = MagicMock(spec=AiogramMessage)
     mock_message.edit_text = AsyncMock()
+    mock_message.answer = AsyncMock()  # Для handle_enter_past_month и других
 
     mock_callback = MagicMock(spec=CallbackQuery)
     mock_callback.from_user = MockUser(user_id)
@@ -312,3 +317,246 @@ class TestConfirmationE2E:
         mock_callback.message.edit_text.assert_called_once()
         edited_text = mock_callback.message.edit_text.call_args[0][0]
         assert "отменено" in edited_text.lower()
+
+
+class TestPastModeE2E:
+    """E2E тесты режима ввода расходов за прошлый месяц с реальной БД."""
+
+    @pytest.mark.asyncio
+    async def test_past_mode_full_cycle(self):
+        """
+        Сценарий 1: включение режима → ввод → выключение → ввод на сегодня.
+        
+        1. Включаем режим прошлого (Июнь 2024)
+        2. Вводим расход → записывается на 1 июня 2024
+        3. Выключаем режим
+        4. Вводим расход → записывается на сегодня
+        """
+        from datetime import datetime, timezone
+        from bot.routers.menu import handle_enter_past_month, handle_disable_past
+
+        user_id = 88881
+        mock_state = MockState()
+
+        # Шаг 1: Включаем режим прошлого (Июнь 2024)
+        mock_callback = create_mock_callback(user_id=user_id, data="enter_past_month:2024:6")
+        await handle_enter_past_month(mock_callback, mock_state)
+
+        # Проверяем что режим включён
+        assert mock_state._data.get("past_mode_year") == 2024
+        assert mock_state._data.get("past_mode_month") == 6
+
+        # Шаг 2: Вводим расход в режиме прошлого
+        mock_message1 = MockMessage("Продукты в прошлом 100", user_id=user_id)
+        await handle_message(mock_message1, mock_state)
+
+        # Проверяем что записалось на 1 июня 2024
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id).order_by(Message.id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 1
+            assert messages[0].text == "Продукты в прошлом 100"
+            assert messages[0].created_at.year == 2024
+            assert messages[0].created_at.month == 6
+            assert messages[0].created_at.day == 1
+
+        # Шаг 3: Выключаем режим
+        mock_callback2 = create_mock_callback(user_id=user_id, data="disable_past")
+        await handle_disable_past(mock_callback2, mock_state)
+
+        # Проверяем что режим выключен
+        assert mock_state._data.get("past_mode_year") is None
+        assert mock_state._data.get("past_mode_month") is None
+
+        # Шаг 4: Вводим расход без режима прошлого
+        mock_message2 = MockMessage("Продукты сегодня 200", user_id=user_id)
+        await handle_message(mock_message2, mock_state)
+
+        # Проверяем что записалось на сегодня
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id).order_by(Message.id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 2
+            # Второе сообщение должно быть записано на сегодня
+            today = datetime.now(timezone.utc)
+            assert messages[1].text == "Продукты сегодня 200"
+            assert messages[1].created_at.year == today.year
+            assert messages[1].created_at.month == today.month
+            assert messages[1].created_at.day == today.day
+
+    @pytest.mark.asyncio
+    async def test_past_mode_switch_to_different_month(self):
+        """
+        Сценарий 2: переключение на другой месяц.
+        
+        1. Включаем режим прошлого (Июнь 2024)
+        2. Вводим расход → записывается на 1 июня 2024
+        3. Переключаемся на другой месяц (Март 2024)
+        4. Вводим расход → записывается на 1 марта 2024
+        5. Выключаем режим
+        6. Вводим расход → записывается на сегодня
+        """
+        from datetime import datetime, timezone
+        from bot.routers.menu import handle_enter_past_month, handle_disable_past
+
+        user_id = 88882
+        mock_state = MockState()
+
+        # Шаг 1: Включаем режим прошлого (Июнь 2024)
+        mock_callback1 = create_mock_callback(user_id=user_id, data="enter_past_month:2024:6")
+        await handle_enter_past_month(mock_callback1, mock_state)
+
+        # Шаг 2: Вводим расход
+        mock_message1 = MockMessage("Июньский расход 100", user_id=user_id)
+        await handle_message(mock_message1, mock_state)
+
+        # Шаг 3: Переключаемся на Март 2024
+        mock_callback2 = create_mock_callback(user_id=user_id, data="enter_past_month:2024:3")
+        await handle_enter_past_month(mock_callback2, mock_state)
+
+        assert mock_state._data.get("past_mode_year") == 2024
+        assert mock_state._data.get("past_mode_month") == 3
+
+        # Шаг 4: Вводим расход
+        mock_message2 = MockMessage("Мартовский расход 200", user_id=user_id)
+        await handle_message(mock_message2, mock_state)
+
+        # Шаг 5: Выключаем режим
+        mock_callback3 = create_mock_callback(user_id=user_id, data="disable_past")
+        await handle_disable_past(mock_callback3, mock_state)
+
+        # Шаг 6: Вводим расход на сегодня
+        mock_message3 = MockMessage("Сегодняшний расход 300", user_id=user_id)
+        await handle_message(mock_message3, mock_state)
+
+        # Проверяем все записи
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id).order_by(Message.id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 3
+
+            # Первый расход - Июнь 2024
+            assert messages[0].text == "Июньский расход 100"
+            assert messages[0].created_at.year == 2024
+            assert messages[0].created_at.month == 6
+            assert messages[0].created_at.day == 1
+
+            # Второй расход - Март 2024
+            assert messages[1].text == "Мартовский расход 200"
+            assert messages[1].created_at.year == 2024
+            assert messages[1].created_at.month == 3
+            assert messages[1].created_at.day == 1
+
+            # Третий расход - сегодня
+            today = datetime.now(timezone.utc)
+            assert messages[2].text == "Сегодняшний расход 300"
+            assert messages[2].created_at.year == today.year
+            assert messages[2].created_at.month == today.month
+            assert messages[2].created_at.day == today.day
+
+    @pytest.mark.asyncio
+    async def test_past_mode_reselect_same_month(self):
+        """
+        Сценарий 3: повторный выбор того же месяца.
+        
+        1. Включаем режим прошлого (Июнь 2024)
+        2. Вводим расход → записывается на 1 июня 2024
+        3. Повторно выбираем тот же месяц (Июнь 2024)
+        4. Вводим расход → записывается на 1 июня 2024 (тот же месяц)
+        5. Выключаем режим
+        6. Вводим расход → записывается на сегодня
+        """
+        from datetime import datetime, timezone
+        from bot.routers.menu import handle_enter_past_month, handle_disable_past
+
+        user_id = 88883
+        mock_state = MockState()
+
+        # Шаг 1: Включаем режим прошлого (Июнь 2024)
+        mock_callback1 = create_mock_callback(user_id=user_id, data="enter_past_month:2024:6")
+        await handle_enter_past_month(mock_callback1, mock_state)
+
+        # Шаг 2: Вводим первый расход
+        mock_message1 = MockMessage("Первый июньский 100", user_id=user_id)
+        await handle_message(mock_message1, mock_state)
+
+        # Шаг 3: Повторно выбираем тот же месяц (Июнь 2024)
+        mock_callback2 = create_mock_callback(user_id=user_id, data="enter_past_month:2024:6")
+        await handle_enter_past_month(mock_callback2, mock_state)
+
+        # Режим всё ещё активен для того же месяца
+        assert mock_state._data.get("past_mode_year") == 2024
+        assert mock_state._data.get("past_mode_month") == 6
+
+        # Шаг 4: Вводим второй расход
+        mock_message2 = MockMessage("Второй июньский 200", user_id=user_id)
+        await handle_message(mock_message2, mock_state)
+
+        # Шаг 5: Выключаем режим
+        mock_callback3 = create_mock_callback(user_id=user_id, data="disable_past")
+        await handle_disable_past(mock_callback3, mock_state)
+
+        # Шаг 6: Вводим расход на сегодня
+        mock_message3 = MockMessage("Сегодняшний 300", user_id=user_id)
+        await handle_message(mock_message3, mock_state)
+
+        # Проверяем все записи
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id).order_by(Message.id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 3
+
+            # Первый расход - Июнь 2024
+            assert messages[0].text == "Первый июньский 100"
+            assert messages[0].created_at.year == 2024
+            assert messages[0].created_at.month == 6
+            assert messages[0].created_at.day == 1
+
+            # Второй расход - тоже Июнь 2024 (тот же месяц!)
+            assert messages[1].text == "Второй июньский 200"
+            assert messages[1].created_at.year == 2024
+            assert messages[1].created_at.month == 6
+            assert messages[1].created_at.day == 1
+
+            # Третий расход - сегодня
+            today = datetime.now(timezone.utc)
+            assert messages[2].text == "Сегодняшний 300"
+            assert messages[2].created_at.year == today.year
+            assert messages[2].created_at.month == today.month
+            assert messages[2].created_at.day == today.day
+
+    @pytest.mark.asyncio
+    async def test_past_mode_multiple_costs_in_one_message(self):
+        """Несколько расходов в одном сообщении записываются в режиме прошлого."""
+        from bot.routers.menu import handle_enter_past_month
+
+        user_id = 88884
+        mock_state = MockState()
+
+        # Включаем режим прошлого
+        mock_callback = create_mock_callback(user_id=user_id, data="enter_past_month:2024:1")
+        await handle_enter_past_month(mock_callback, mock_state)
+
+        # Вводим несколько расходов одним сообщением
+        mock_message = MockMessage("Продукты 100\nВода 50\nХлеб 30", user_id=user_id)
+        await handle_message(mock_message, mock_state)
+
+        # Проверяем что все записались на январь 2024
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id).order_by(Message.id)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+
+            assert len(messages) == 3
+            for msg in messages:
+                assert msg.created_at.year == 2024
+                assert msg.created_at.month == 1
+                assert msg.created_at.day == 1
