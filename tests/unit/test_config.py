@@ -68,3 +68,60 @@ class TestSettingsValidation:
             database_url="postgresql://user:pass@localhost/db",
         )
         assert settings.database_url == "postgresql://user:pass@localhost/db"
+
+
+class TestAllowedUserIdsValidation:
+    """Тесты валидации allowed_user_ids."""
+
+    def test_allowed_user_ids_default_empty(self):
+        """По умолчанию список разрешённых пользователей пуст."""
+        settings = Settings(
+            bot_token="123456789:ABCdefGHIjkl",
+            database_url="postgresql://user:pass@localhost/db",
+        )
+        assert settings.allowed_user_ids == []
+
+    def test_allowed_user_ids_from_list(self):
+        """Список пользователей из списка."""
+        settings = Settings(
+            bot_token="123456789:ABCdefGHIjkl",
+            database_url="postgresql://user:pass@localhost/db",
+            allowed_user_ids=[123, 456, 789],
+        )
+        assert settings.allowed_user_ids == [123, 456, 789]
+
+    def test_allowed_user_ids_from_comma_separated_string(self):
+        """Список пользователей из строки с разделителем-запятой."""
+        settings = Settings(
+            bot_token="123456789:ABCdefGHIjkl",
+            database_url="postgresql://user:pass@localhost/db",
+            allowed_user_ids="123,456,789",
+        )
+        assert settings.allowed_user_ids == [123, 456, 789]
+
+    def test_allowed_user_ids_from_string_with_spaces(self):
+        """Список пользователей из строки с пробелами."""
+        settings = Settings(
+            bot_token="123456789:ABCdefGHIjkl",
+            database_url="postgresql://user:pass@localhost/db",
+            allowed_user_ids="123, 456,  789",
+        )
+        assert settings.allowed_user_ids == [123, 456, 789]
+
+    def test_allowed_user_ids_empty_string(self):
+        """Пустая строка даёт пустой список."""
+        settings = Settings(
+            bot_token="123456789:ABCdefGHIjkl",
+            database_url="postgresql://user:pass@localhost/db",
+            allowed_user_ids="",
+        )
+        assert settings.allowed_user_ids == []
+
+    def test_allowed_user_ids_single_value(self):
+        """Одно значение в строке."""
+        settings = Settings(
+            bot_token="123456789:ABCdefGHIjkl",
+            database_url="postgresql://user:pass@localhost/db",
+            allowed_user_ids="123456789",
+        )
+        assert settings.allowed_user_ids == [123456789]

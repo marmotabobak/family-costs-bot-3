@@ -9,6 +9,7 @@ from aiogram.enums import ParseMode
 from bot.config import settings
 from bot.db.session import engine
 from bot.logging_config import setup_logging
+from bot.middleware import AllowedUsersMiddleware
 from bot.routers import messages, common
 
 setup_logging()
@@ -24,6 +25,7 @@ async def main() -> None:
     )
 
     dp = Dispatcher()
+    dp.message.middleware(AllowedUsersMiddleware())
     dp.include_router(messages.router)
     dp.include_router(common.router)
 

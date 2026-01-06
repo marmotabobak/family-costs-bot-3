@@ -13,6 +13,18 @@ class Settings(BaseSettings):
     bot_token: str
     database_url: str
     env: Environment = Environment.prod
+    allowed_user_ids: list[int] | str= []
+
+    @field_validator("allowed_user_ids", mode="before")
+    @classmethod
+    def parse_allowed_user_ids(cls, v: str | list[int]) -> list[int]:
+        """Парсинг списка разрешённых telegram user_id из строки или списка."""
+        if isinstance(v, list):
+            return v
+        if not v or not v.strip():
+            return []
+        # Парсим строку вида "123,456,789" или "123, 456, 789"
+        return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
 
     @field_validator("bot_token")
     @classmethod
