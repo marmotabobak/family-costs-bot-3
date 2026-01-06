@@ -20,17 +20,40 @@ class ParseResult:
 
 MESSAGE_RE = re.compile(r"^\s*(?P<text>.+?)\s+(?P<amount>[+-]?\d+(?:[.,]\d+)?)\s*$")
 
+# Лимиты для защиты от DoS атак
+MAX_MESSAGE_LENGTH = 4096  # Telegram limit
+MAX_LINE_LENGTH = 500
+MAX_LINES = 100
+
 
 def parse_message(message: str | None) -> ParseResult | None:
     if not message:
         return None
 
+    # Проверка общей длины сообщения
+    if len(message) > MAX_MESSAGE_LENGTH:
+        logger.warning("Message too long: %d characters", len(message))
+        return None
+
+    lines = message.splitlines()
+
+    # Проверка количества строк
+    if len(lines) > MAX_LINES:
+        logger.warning("Too many lines: %d", len(lines))
+        return None
+
     valid_costs: list[Cost] = []
     invalid_costs: list[str] = []
 
-    for raw_line in message.splitlines():
+    for raw_line in lines:
         line = raw_line.strip()
         if not line:
+            continue
+
+        # Проверка длины строки
+        if len(line) > MAX_LINE_LENGTH:
+            logger.debug("Line too long: %r", line[:100])
+            invalid_costs.append(raw_line[:100] + "...")
             continue
 
         match = MESSAGE_RE.match(line)
