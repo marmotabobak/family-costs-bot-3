@@ -1,7 +1,7 @@
 from unittest.mock import patch
 import pytest
 
-from bot.constants import MSG_DB_ERROR, MSG_DB_PARTIAL_ERROR, MSG_INVALID_LINES, MSG_PARSE_ERROR, MSG_SUCCESS
+from bot.constants import MSG_DB_ERROR, MSG_INVALID_LINES, MSG_PARSE_ERROR, MSG_SUCCESS
 from bot.routers.messages import handle_message
 
 
@@ -109,11 +109,14 @@ class TestHandleMessage:
 
             await handle_message(mock_message)
 
+            # Проверяем что вызвано 3 раза (по разу на каждый расход)
             assert mock_save.call_count == 3
+            # И один commit в конце
+            mock_session.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_partial_save_shows_failed_costs(self, mock_message, mock_session):
-        """Частичное сохранение — показывает какие расходы не сохранились."""
+    async def test_db_error_during_save_rolls_back_all(self, mock_message, mock_session):
+        """При ошибке БД во время сохранения откатываются все изменения."""
         from sqlalchemy.exc import SQLAlchemyError
 
         mock_message.text = "Продукты 100\nВода 50\nХлеб 30"
@@ -123,16 +126,15 @@ class TestHandleMessage:
             patch("bot.routers.messages.save_message") as mock_save,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
-            # Второй вызов падает с ошибкой БД
+            # Второй вызов падает с ошибкой БД - откатываются ВСЕ
             mock_save.side_effect = [None, SQLAlchemyError("DB error"), None]
 
             await handle_message(mock_message)
 
-            # Проверяем что было 3 попытки сохранения (по одной на каждый расход)
-            assert mock_save.call_count == 3
+            # Проверяем что было 2 попытки до ошибки
+            assert mock_save.call_count == 2
+            # Проверяем что был rollback
+            mock_session.rollback.assert_called_once()
 
-        response = mock_message.answer.call_args[0][0]
-        # Проверяем что показаны неудачные расходы
-        assert MSG_DB_PARTIAL_ERROR.format(lines="- Вода 50") in response
-        # И успешные
-        assert MSG_SUCCESS.format(count=2, word="расхода") in response
+        # Проверяем что показана ошибка БД (все провалилось)
+        mock_message.answer.assert_called_once_with(MSG_DB_ERROR)

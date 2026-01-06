@@ -28,6 +28,7 @@ class TestFullMessageFlow:
         async with get_session() as session:
             for cost in result.valid_lines:
                 await save_message(session, user_id, f"{cost.name} {cost.amount}")
+            await session.commit()
 
         # 3. Проверка в БД
         async with get_session() as session:
@@ -70,14 +71,15 @@ class TestTransactionBehavior:
             assert len(messages) == 0, "Rollback не сработал - данные остались в БД"
 
     @pytest.mark.asyncio
-    async def test_save_message_commits_immediately(self):
-        """save_message делает commit и данные сразу видны в другой сессии."""
+    async def test_save_message_with_commit(self):
+        """После commit данные видны в другой сессии."""
         user_id = 789
-        text = "Immediate commit test"
+        text = "Commit test"
 
         # Сохраняем в одной сессии
         async with get_session() as session:
             await save_message(session, user_id, text)
+            await session.commit()
 
         # Читаем в другой сессии - данные должны быть видны
         async with get_session() as session:
@@ -100,6 +102,7 @@ class TestMultipleMessages:
         async with get_session() as session:
             for text in texts:
                 await save_message(session, user_id, text)
+            await session.commit()
 
         # Проверяем количество
         async with get_session() as session:
@@ -120,6 +123,7 @@ class TestMultipleMessages:
             await save_message(session, user1_id, "User 1 Message 1")
             await save_message(session, user1_id, "User 1 Message 2")
             await save_message(session, user2_id, "User 2 Message 1")
+            await session.commit()
 
         # Проверяем что каждый видит только свои
         async with get_session() as session:
@@ -178,6 +182,7 @@ class TestTimestamps:
         """created_at сохраняется с timezone."""
         async with get_session() as session:
             message = await save_message(session, 555, "Timezone test")
+            await session.commit()
 
             # Проверяем что timezone есть
             assert message.created_at.tzinfo is not None, "created_at не имеет timezone"
@@ -185,15 +190,16 @@ class TestTimestamps:
     @pytest.mark.asyncio
     async def test_created_at_is_recent(self):
         """created_at устанавливается в момент создания записи."""
-        before = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
 
         async with get_session() as session:
             message = await save_message(session, 666, "Timestamp test")
+            await session.commit()
 
-        after = datetime.now(timezone.utc)
-
-        # Проверяем что created_at между before и after
-        assert before <= message.created_at <= after, "created_at не в ожидаемом диапазоне"
+        # Проверяем что created_at близко к текущему времени (в пределах 5 секунд)
+        # Используем abs() чтобы учесть возможную разницу часов Python/PostgreSQL
+        time_diff = abs((now - message.created_at).total_seconds())
+        assert time_diff < 5, f"created_at слишком далеко от текущего времени: {time_diff}s"
 
     @pytest.mark.asyncio
     async def test_messages_ordered_by_created_at(self):
@@ -204,6 +210,7 @@ class TestTimestamps:
             msg1 = await save_message(session, user_id, "First")
             msg2 = await save_message(session, user_id, "Second")
             msg3 = await save_message(session, user_id, "Third")
+            await session.commit()
 
         # Проверяем порядок по времени
         assert msg1.created_at <= msg2.created_at <= msg3.created_at
@@ -220,6 +227,7 @@ class TestConstraints:
         async with get_session() as session:
             with pytest.raises(IntegrityError) as exc_info:
                 await save_message(session, 0, "Invalid user_id")
+                await session.commit()
 
             # Проверяем что ошибка связана с check constraint
             assert "check" in str(exc_info.value).lower()
@@ -232,6 +240,7 @@ class TestConstraints:
         async with get_session() as session:
             with pytest.raises(IntegrityError) as exc_info:
                 await save_message(session, -1, "Negative user_id")
+                await session.commit()
 
             # Проверяем что ошибка связана с check constraint
             assert "check" in str(exc_info.value).lower()
@@ -241,6 +250,7 @@ class TestConstraints:
         """CHECK constraint позволяет сохранить положительный user_id."""
         async with get_session() as session:
             message = await save_message(session, 123456789, "Valid user_id")
+            await session.commit()
 
             assert message.id is not None
             assert message.user_id == 123456789

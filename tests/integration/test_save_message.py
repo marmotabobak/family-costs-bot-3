@@ -13,6 +13,7 @@ async def test_save_message():
 
     async with get_session() as session:
         message = await save_message(session, user_id, text)
+        await session.commit()
 
     # 1. Целостность
     assert message.id is not None
