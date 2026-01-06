@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 
-@router.message(~Command(commands=["start", "help"]))
+@router.message(~Command(commands=["start", "help", "menu"]))
 async def handle_message(message: Message):
     if not message.text or not message.from_user:
         return
