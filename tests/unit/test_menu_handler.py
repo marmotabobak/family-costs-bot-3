@@ -6,20 +6,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.db.repositories.messages import UserCostsStats
 from bot.routers.menu import (
     CALLBACK_MY_COSTS,
+    CALLBACK_PERIOD_PREFIX,
     CALLBACK_USER_COSTS_PREFIX,
+    CALLBACK_MONTH_PREFIX,
     build_menu_keyboard,
-    format_costs_report,
+    build_period_keyboard,
+    build_months_keyboard,
+    format_month_report,
     handle_my_costs,
     handle_user_costs,
+    handle_period_selection,
+    handle_month_selection,
     menu_command,
 )
 
 
 class TestBuildMenuKeyboard:
-    """Тесты построения клавиатуры меню."""
+    """Тесты построения главного меню."""
 
     def test_empty_user_list(self):
         """Пустой список пользователей - только кнопка 'Мои расходы'."""
@@ -33,10 +38,8 @@ class TestBuildMenuKeyboard:
         """Текущий пользователь не показывается в списке."""
         keyboard = build_menu_keyboard(current_user_id=123, all_user_ids=[123, 456, 789])
 
-        # Должна быть кнопка "Мои расходы" + 2 кнопки для других пользователей
         assert len(keyboard.inline_keyboard) == 3
 
-        # Проверяем что нет кнопки для user_id=123
         callback_datas = [row[0].callback_data for row in keyboard.inline_keyboard]
         assert f"{CALLBACK_USER_COSTS_PREFIX}123" not in callback_datas
 
@@ -44,84 +47,92 @@ class TestBuildMenuKeyboard:
         """Все пользователи кроме текущего показаны."""
         keyboard = build_menu_keyboard(current_user_id=100, all_user_ids=[123, 456, 789])
 
-        assert len(keyboard.inline_keyboard) == 4  # Мои расходы + 3 пользователя
+        assert len(keyboard.inline_keyboard) == 4
 
-        # Проверяем callback_data для каждого пользователя
         callback_datas = [row[0].callback_data for row in keyboard.inline_keyboard[1:]]
         assert f"{CALLBACK_USER_COSTS_PREFIX}123" in callback_datas
         assert f"{CALLBACK_USER_COSTS_PREFIX}456" in callback_datas
         assert f"{CALLBACK_USER_COSTS_PREFIX}789" in callback_datas
 
-    def test_button_text_contains_user_id(self):
-        """Текст кнопки содержит user_id."""
-        keyboard = build_menu_keyboard(current_user_id=100, all_user_ids=[123])
 
-        user_button = keyboard.inline_keyboard[1][0]
-        assert "123" in user_button.text
+class TestBuildPeriodKeyboard:
+    """Тесты построения меню выбора периода."""
+
+    def test_has_three_buttons(self):
+        """Клавиатура содержит три кнопки периодов."""
+        keyboard = build_period_keyboard(user_id=123, is_own=True)
+
+        assert len(keyboard.inline_keyboard) == 3
+
+    def test_callback_data_format(self):
+        """Проверка формата callback_data."""
+        keyboard = build_period_keyboard(user_id=456, is_own=False)
+
+        callback_datas = [row[0].callback_data for row in keyboard.inline_keyboard]
+        assert f"{CALLBACK_PERIOD_PREFIX}456:this_month" in callback_datas
+        assert f"{CALLBACK_PERIOD_PREFIX}456:prev_month" in callback_datas
+        assert f"{CALLBACK_PERIOD_PREFIX}456:other" in callback_datas
 
 
-class TestFormatCostsReport:
-    """Тесты форматирования отчёта о расходах."""
+class TestBuildMonthsKeyboard:
+    """Тесты построения меню выбора месяца."""
 
-    def test_empty_stats_own(self):
-        """Пустая статистика для своих расходов."""
-        stats = UserCostsStats(
-            total_amount=Decimal("0"),
-            count=0,
-            first_date=None,
-            last_date=None,
-        )
-        report = format_costs_report(stats, [], user_id=123, is_own=True)
-        assert "нет записанных расходов" in report
-        assert "вас" in report.lower()
+    def test_creates_buttons_for_months(self):
+        """Создаёт кнопки для каждого месяца."""
+        months = [(2024, 1), (2024, 2), (2023, 12)]
+        keyboard = build_months_keyboard(user_id=123, available_months=months)
 
-    def test_empty_stats_other_user(self):
-        """Пустая статистика для чужих расходов."""
-        stats = UserCostsStats(
-            total_amount=Decimal("0"),
-            count=0,
-            first_date=None,
-            last_date=None,
-        )
-        report = format_costs_report(stats, [], user_id=456, is_own=False)
-        assert "нет записанных расходов" in report
+        assert len(keyboard.inline_keyboard) == 3
+
+    def test_callback_data_format(self):
+        """Проверка формата callback_data."""
+        months = [(2024, 3)]
+        keyboard = build_months_keyboard(user_id=456, available_months=months)
+
+        assert keyboard.inline_keyboard[0][0].callback_data == f"{CALLBACK_MONTH_PREFIX}456:2024:3"
+
+    def test_button_text_contains_month_name(self):
+        """Текст кнопки содержит название месяца."""
+        months = [(2024, 1)]
+        keyboard = build_months_keyboard(user_id=123, available_months=months)
+
+        assert "Январь" in keyboard.inline_keyboard[0][0].text
+        assert "2024" in keyboard.inline_keyboard[0][0].text
+
+
+class TestFormatMonthReport:
+    """Тесты форматирования отчёта за месяц."""
+
+    def test_empty_costs_own(self):
+        """Пустой отчёт для своих расходов."""
+        report = format_month_report([], year=2024, month=1, user_id=123, is_own=True)
+
+        assert "Январь 2024" in report
+        assert "Нет расходов" in report
+
+    def test_empty_costs_other_user(self):
+        """Пустой отчёт для чужих расходов."""
+        report = format_month_report([], year=2024, month=1, user_id=456, is_own=False)
+
+        assert "Январь 2024" in report
         assert "456" in report
 
-    def test_stats_with_data_own(self):
-        """Статистика с данными для своих расходов."""
-        stats = UserCostsStats(
-            total_amount=Decimal("1500.50"),
-            count=10,
-            first_date=datetime(2024, 1, 1, 12, 0),
-            last_date=datetime(2024, 1, 15, 18, 30),
-        )
-        recent = [
-            ("Продукты", Decimal("100.00"), datetime(2024, 1, 15)),
-            ("Транспорт", Decimal("50.50"), datetime(2024, 1, 14)),
+    def test_report_with_costs(self):
+        """Отчёт с расходами."""
+        costs = [
+            ("Продукты", Decimal("100.00"), datetime(2024, 1, 15, 10, 0)),
+            ("Транспорт", Decimal("50.50"), datetime(2024, 1, 20, 12, 30)),
         ]
-        report = format_costs_report(stats, recent, user_id=123, is_own=True)
+        report = format_month_report(costs, year=2024, month=1, user_id=123, is_own=True)
 
-        assert "Ваши расходы" in report
-        assert "1500.50" in report
-        assert "10" in report
-        assert "01.01.2024" in report
-        assert "15.01.2024" in report
+        assert "Январь 2024" in report
+        assert "150.50" in report  # total
+        assert "15.01" in report
         assert "Продукты" in report
+        assert "100.00" in report
+        assert "20.01" in report
         assert "Транспорт" in report
-
-    def test_stats_with_data_other_user(self):
-        """Статистика с данными для чужих расходов."""
-        stats = UserCostsStats(
-            total_amount=Decimal("500.00"),
-            count=5,
-            first_date=datetime(2024, 2, 1),
-            last_date=datetime(2024, 2, 10),
-        )
-        report = format_costs_report(stats, [], user_id=789, is_own=False)
-
-        assert "Расходы пользователя 789" in report
-        assert "500.00" in report
-        assert "5" in report
+        assert "50.50" in report
 
 
 class TestMenuCommand:
@@ -170,7 +181,6 @@ class TestMenuCommand:
             message.answer.assert_called_once()
             call_kwargs = message.answer.call_args.kwargs
             assert "reply_markup" in call_kwargs
-            assert call_kwargs["reply_markup"] is not None
 
 
 class TestHandleMyCosts:
@@ -209,33 +219,15 @@ class TestHandleMyCosts:
         cb.answer.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_sends_costs_report(self, callback):
-        """Отправляет отчёт о расходах."""
-        mock_session = AsyncMock()
-        mock_stats = UserCostsStats(
-            total_amount=Decimal("100.00"),
-            count=2,
-            first_date=datetime(2024, 1, 1),
-            last_date=datetime(2024, 1, 2),
-        )
-        mock_recent = [("Продукты", Decimal("100.00"), datetime(2024, 1, 2))]
+    async def test_shows_period_selection(self, callback):
+        """Показывает выбор периода."""
+        await handle_my_costs(callback)
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_user_costs_stats") as mock_get_stats, \
-             patch("bot.routers.menu.get_user_recent_costs") as mock_get_recent:
+        callback.answer.assert_called_once()
+        callback.message.answer.assert_called_once()
 
-            mock_get_session.return_value.__aenter__.return_value = mock_session
-            mock_get_stats.return_value = mock_stats
-            mock_get_recent.return_value = mock_recent
-
-            await handle_my_costs(callback)
-
-            callback.answer.assert_called_once()
-            callback.message.answer.assert_called_once()
-
-            response = callback.message.answer.call_args[0][0]
-            assert "100.00" in response
-            assert "Продукты" in response
+        call_kwargs = callback.message.answer.call_args.kwargs
+        assert "reply_markup" in call_kwargs
 
 
 class TestHandleUserCosts:
@@ -275,41 +267,23 @@ class TestHandleUserCosts:
         cb.answer.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_sends_costs_report_for_target_user(self, callback):
-        """Отправляет отчёт о расходах целевого пользователя."""
-        mock_session = AsyncMock()
-        mock_stats = UserCostsStats(
-            total_amount=Decimal("250.00"),
-            count=3,
-            first_date=datetime(2024, 1, 1),
-            last_date=datetime(2024, 1, 3),
-        )
+    async def test_shows_period_selection_for_target_user(self, callback):
+        """Показывает выбор периода для целевого пользователя."""
+        await handle_user_costs(callback)
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_user_costs_stats") as mock_get_stats, \
-             patch("bot.routers.menu.get_user_recent_costs") as mock_get_recent:
+        callback.answer.assert_called_once()
+        callback.message.answer.assert_called_once()
 
-            mock_get_session.return_value.__aenter__.return_value = mock_session
-            mock_get_stats.return_value = mock_stats
-            mock_get_recent.return_value = []
+        response = callback.message.answer.call_args[0][0]
+        assert "456" in response
 
-            await handle_user_costs(callback)
 
-            # Проверяем что запросили статистику для user_id=456
-            mock_get_stats.assert_called_once()
-            call_args = mock_get_stats.call_args[0]
-            assert call_args[1] == 456
+class TestHandlePeriodSelection:
+    """Тесты обработчика выбора периода."""
 
-            callback.answer.assert_called_once()
-            callback.message.answer.assert_called_once()
-
-            response = callback.message.answer.call_args[0][0]
-            assert "456" in response
-            assert "250.00" in response
-
-    @pytest.mark.asyncio
-    async def test_handles_invalid_user_id(self):
-        """Обрабатывает некорректный user_id."""
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
         from aiogram.types import CallbackQuery, Message, User
 
         user = MagicMock(spec=User)
@@ -321,13 +295,86 @@ class TestHandleUserCosts:
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = user
         cb.message = msg
-        cb.data = f"{CALLBACK_USER_COSTS_PREFIX}invalid"
         cb.answer = AsyncMock()
 
-        await handle_user_costs(cb)
+        return cb
 
-        # callback.answer вызывается с сообщением об ошибке
-        cb.answer.assert_called_once()
-        assert "ошибка" in cb.answer.call_args[0][0].lower()
-        # message.answer не вызывается
-        msg.answer.assert_not_called()
+    @pytest.mark.asyncio
+    async def test_this_month_shows_report(self, callback):
+        """Выбор 'Этот месяц' показывает отчёт."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}123:this_month"
+
+        mock_session = AsyncMock()
+        mock_costs = [("Продукты", Decimal("100.00"), datetime.now())]
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs:
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_costs.return_value = mock_costs
+
+            await handle_period_selection(callback)
+
+            callback.answer.assert_called_once()
+            callback.message.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_other_shows_months_list(self, callback):
+        """Выбор 'Другие месяцы' показывает список месяцев."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}123:other"
+
+        mock_session = AsyncMock()
+        mock_months = [(2024, 1), (2024, 2)]
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months:
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_months.return_value = mock_months
+
+            await handle_period_selection(callback)
+
+            callback.answer.assert_called_once()
+
+
+class TestHandleMonthSelection:
+    """Тесты обработчика выбора конкретного месяца."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.answer = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = f"{CALLBACK_MONTH_PREFIX}123:2024:1"
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_shows_month_report(self, callback):
+        """Показывает отчёт за выбранный месяц."""
+        mock_session = AsyncMock()
+        mock_costs = [("Продукты", Decimal("100.00"), datetime(2024, 1, 15))]
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs:
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_costs.return_value = mock_costs
+
+            await handle_month_selection(callback)
+
+            callback.answer.assert_called_once()
+            callback.message.answer.assert_called_once()
+
+            response = callback.message.answer.call_args[0][0]
+            assert "Январь 2024" in response

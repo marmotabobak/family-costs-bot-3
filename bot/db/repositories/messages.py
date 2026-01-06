@@ -87,6 +87,57 @@ async def get_unique_user_ids(session: AsyncSession) -> list[int]:
     return list(result.scalars().all())
 
 
+async def get_user_costs_by_month(
+    session: AsyncSession, user_id: int, year: int, month: int
+) -> list[tuple[str, Decimal, datetime]]:
+    """Возвращает расходы пользователя за конкретный месяц, отсортированные по дате."""
+    from sqlalchemy import extract
+
+    result = await session.execute(
+        select(Message.text, Message.created_at)
+        .where(Message.user_id == user_id)
+        .where(extract("year", Message.created_at) == year)
+        .where(extract("month", Message.created_at) == month)
+        .order_by(Message.created_at)
+    )
+    rows = result.all()
+
+    costs = []
+    for row in rows:
+        parts = row.text.rsplit(maxsplit=1)
+        if len(parts) == 2:
+            try:
+                amount = Decimal(parts[1].replace(",", "."))
+                costs.append((parts[0], amount, row.created_at))
+            except Exception:
+                pass
+
+    return costs
+
+
+async def get_user_available_months(
+    session: AsyncSession, user_id: int
+) -> list[tuple[int, int]]:
+    """Возвращает список (year, month) для которых есть записи, отсортированный по убыванию."""
+    from sqlalchemy import extract
+
+    result = await session.execute(
+        select(
+            extract("year", Message.created_at).label("year"),
+            extract("month", Message.created_at).label("month"),
+        )
+        .where(Message.user_id == user_id)
+        .group_by("year", "month")
+        .order_by(
+            extract("year", Message.created_at).desc(),
+            extract("month", Message.created_at).desc(),
+        )
+    )
+    rows = result.all()
+
+    return [(int(row.year), int(row.month)) for row in rows]
+
+
 async def save_message(
     session: AsyncSession,
     user_id: int,

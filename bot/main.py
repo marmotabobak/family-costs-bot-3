@@ -47,9 +47,8 @@ async def main() -> None:
 
     # Устанавливаем команды бота для меню
     await bot.set_my_commands([
-        BotCommand(command="start", description="Начать работу с ботом"),
-        BotCommand(command="menu", description="Показать меню расходов"),
-        BotCommand(command="help", description="Справка по формату сообщений"),
+        BotCommand(command="menu", description="Расходы"),
+        BotCommand(command="help", description="Справка"),
     ])
 
     logger.info("Bot started. Press Ctrl+C to stop.")
