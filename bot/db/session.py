@@ -6,12 +6,11 @@ engine = create_async_engine(
     settings.database_url,
     echo=settings.debug,
     future=True,
-    # Connection pool настройки для production
-    pool_size=10,  # Количество постоянных соединений
-    max_overflow=20,  # Дополнительные соединения при пиках (итого до 30)
-    pool_timeout=30,  # Таймаут ожидания соединения (секунды)
-    pool_pre_ping=True,  # Проверка соединения перед использованием
-    pool_recycle=3600,  # Переподключение через час (защита от stale connections)
+    pool_size=10,
+    max_overflow=20,
+    pool_timeout=30,
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
 async_session_maker = async_sessionmaker(

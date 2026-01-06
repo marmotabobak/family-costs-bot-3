@@ -53,16 +53,16 @@ async def shutdown(bot: Bot, dp: Dispatcher) -> None:
     """Останавливает polling."""
     logger.info("Stopping polling...")
     await dp.stop_polling()
-    # Не закрываем сессию здесь - это сделает cleanup()
 
 
 async def cleanup(bot: Bot) -> None:
     """Освобождает ресурсы."""
     logger.info("Cleaning up resources...")
 
-    # Безопасное закрытие HTTP сессии бота (aiohttp ClientSession)
-    if not bot.session.closed:
+    try:
         await bot.session.close()
+    except Exception as e:
+        logger.warning("Error closing bot session: %s", e)
 
     # Закрываем connection pool БД
     await engine.dispose()
