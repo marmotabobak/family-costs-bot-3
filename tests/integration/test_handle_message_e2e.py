@@ -259,9 +259,11 @@ class TestConfirmationE2E:
         # Проверяем что state установлен корректно
         assert mock_state._state is not None
         assert len(mock_state._data.get("valid_costs", [])) == 2
+        session_id = mock_state._data.get("confirmation_session_id")
+        assert session_id is not None
 
-        # Шаг 2: подтверждаем сохранение
-        mock_callback = create_mock_callback(user_id=user_id, data="confirm_save")
+        # Шаг 2: подтверждаем сохранение (используем session_id из state)
+        mock_callback = create_mock_callback(user_id=user_id, data=f"confirm:{session_id}")
 
         await handle_confirm_save(mock_callback, mock_state)
 
@@ -305,8 +307,12 @@ class TestConfirmationE2E:
             messages = result.scalars().all()
             assert len(messages) == 0
 
-        # Шаг 2: отменяем сохранение
-        mock_callback = create_mock_callback(user_id=user_id, data="cancel_save")
+        # Получаем session_id из state
+        session_id = mock_state._data.get("confirmation_session_id")
+        assert session_id is not None
+
+        # Шаг 2: отменяем сохранение (используем session_id из state)
+        mock_callback = create_mock_callback(user_id=user_id, data=f"cancel:{session_id}")
 
         await handle_cancel_save(mock_callback, mock_state)
 

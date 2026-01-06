@@ -6,8 +6,8 @@ import pytest
 
 from bot.constants import MSG_DB_ERROR, MSG_PARSE_ERROR
 from bot.routers.messages import (
-    CALLBACK_CANCEL_SAVE,
-    CALLBACK_CONFIRM_SAVE,
+    CALLBACK_CANCEL_PREFIX,
+    CALLBACK_CONFIRM_PREFIX,
     CALLBACK_UNDO_PREFIX,
     SaveCostsStates,
     build_confirmation_keyboard,
@@ -15,6 +15,7 @@ from bot.routers.messages import (
     format_confirmation_message,
     format_past_mode_info,
     format_success_message,
+    generate_session_id,
     get_past_mode_date,
     handle_cancel_save,
     handle_confirm_save,
@@ -158,20 +159,38 @@ class TestBuildConfirmationKeyboard:
 
     def test_has_two_buttons(self):
         """Клавиатура содержит две кнопки."""
-        keyboard = build_confirmation_keyboard()
+        keyboard = build_confirmation_keyboard("test_session")
 
         assert len(keyboard.inline_keyboard) == 1
         assert len(keyboard.inline_keyboard[0]) == 2
 
-    def test_callback_data(self):
-        """Проверка callback_data кнопок."""
-        keyboard = build_confirmation_keyboard()
+    def test_callback_data_contains_session_id(self):
+        """Callback_data содержит session_id."""
+        session_id = "my_unique_session"
+        keyboard = build_confirmation_keyboard(session_id)
 
         buttons = keyboard.inline_keyboard[0]
         callback_datas = [b.callback_data for b in buttons]
 
-        assert CALLBACK_CONFIRM_SAVE in callback_datas
-        assert CALLBACK_CANCEL_SAVE in callback_datas
+        assert f"{CALLBACK_CONFIRM_PREFIX}{session_id}" in callback_datas
+        assert f"{CALLBACK_CANCEL_PREFIX}{session_id}" in callback_datas
+
+
+class TestGenerateSessionId:
+    """Тесты генерации session_id."""
+
+    def test_returns_string(self):
+        """Возвращает строку."""
+        session_id = generate_session_id()
+        assert isinstance(session_id, str)
+
+    def test_unique_ids(self):
+        """Генерирует уникальные ID."""
+        import time
+        id1 = generate_session_id()
+        time.sleep(0.002)  # 2ms
+        id2 = generate_session_id()
+        assert id1 != id2
 
 
 class TestFormatConfirmationMessage:
@@ -217,7 +236,7 @@ class TestHandleConfirmSave:
 
     @pytest.fixture
     def callback(self):
-        """Фикстура CallbackQuery."""
+        """Фикстура CallbackQuery с правильным session_id."""
         from aiogram.types import CallbackQuery, Message, User
 
         user = MagicMock(spec=User)
@@ -229,7 +248,7 @@ class TestHandleConfirmSave:
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = user
         cb.message = msg
-        cb.data = CALLBACK_CONFIRM_SAVE
+        cb.data = f"{CALLBACK_CONFIRM_PREFIX}test_session_123"
         cb.answer = AsyncMock()
 
         return cb
@@ -240,6 +259,7 @@ class TestHandleConfirmSave:
         mock_state.get_data.return_value = {
             "valid_costs": [{"name": "Продукты", "amount": "100"}],
             "invalid_lines": ["bad"],
+            "confirmation_session_id": "test_session_123",
         }
 
         with (
@@ -259,12 +279,27 @@ class TestHandleConfirmSave:
     @pytest.mark.asyncio
     async def test_clears_state_on_no_data(self, callback, mock_state):
         """Очищает состояние если нет данных."""
-        mock_state.get_data.return_value = {}
+        mock_state.get_data.return_value = {"confirmation_session_id": "test_session_123"}
 
         await handle_confirm_save(callback, mock_state)
 
         mock_state.clear.assert_called_once()
         callback.answer.assert_called_once_with("Нет данных для сохранения")
+
+    @pytest.mark.asyncio
+    async def test_rejects_mismatched_session(self, callback, mock_state):
+        """Отклоняет запрос с неправильным session_id."""
+        mock_state.get_data.return_value = {
+            "valid_costs": [{"name": "Продукты", "amount": "100"}],
+            "confirmation_session_id": "different_session",
+        }
+
+        await handle_confirm_save(callback, mock_state)
+
+        # Должен показать alert и не вызывать сохранение
+        callback.answer.assert_called_once()
+        assert "устарело" in callback.answer.call_args[0][0]
+        mock_state.clear.assert_not_called()
 
 
 class TestHandleCancelSave:
@@ -272,7 +307,7 @@ class TestHandleCancelSave:
 
     @pytest.fixture
     def callback(self):
-        """Фикстура CallbackQuery."""
+        """Фикстура CallbackQuery с правильным session_id."""
         from aiogram.types import CallbackQuery, Message, User
 
         user = MagicMock(spec=User)
@@ -284,7 +319,7 @@ class TestHandleCancelSave:
         cb = MagicMock(spec=CallbackQuery)
         cb.from_user = user
         cb.message = msg
-        cb.data = CALLBACK_CANCEL_SAVE
+        cb.data = f"{CALLBACK_CANCEL_PREFIX}test_session_456"
         cb.answer = AsyncMock()
 
         return cb
@@ -292,6 +327,8 @@ class TestHandleCancelSave:
     @pytest.mark.asyncio
     async def test_clears_state_on_cancel(self, callback, mock_state):
         """При отмене очищает состояние."""
+        mock_state.get_data.return_value = {"confirmation_session_id": "test_session_456"}
+
         await handle_cancel_save(callback, mock_state)
 
         mock_state.clear.assert_called_once()
@@ -299,11 +336,25 @@ class TestHandleCancelSave:
     @pytest.mark.asyncio
     async def test_shows_cancel_message(self, callback, mock_state):
         """При отмене показывает сообщение об отмене."""
+        mock_state.get_data.return_value = {"confirmation_session_id": "test_session_456"}
+
         await handle_cancel_save(callback, mock_state)
 
         callback.message.edit_text.assert_called_once()
         message = callback.message.edit_text.call_args[0][0]
         assert "отменено" in message.lower()
+
+    @pytest.mark.asyncio
+    async def test_rejects_mismatched_session(self, callback, mock_state):
+        """Отклоняет запрос с неправильным session_id."""
+        mock_state.get_data.return_value = {"confirmation_session_id": "different_session"}
+
+        await handle_cancel_save(callback, mock_state)
+
+        # Должен показать alert и не очищать состояние
+        callback.answer.assert_called_once()
+        assert "устарело" in callback.answer.call_args[0][0]
+        mock_state.clear.assert_not_called()
 
 
 # ========== Тесты для режима ввода расходов в прошлое ==========

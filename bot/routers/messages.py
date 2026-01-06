@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Callback data для подтверждения
-CALLBACK_CONFIRM_SAVE = "confirm_save"
-CALLBACK_CANCEL_SAVE = "cancel_save"
+CALLBACK_CONFIRM_PREFIX = "confirm:"  # confirm:<session_id>
+CALLBACK_CANCEL_PREFIX = "cancel:"    # cancel:<session_id>
 CALLBACK_DISABLE_PAST = "disable_past"  # отключить режим ввода в прошлое
 CALLBACK_UNDO_PREFIX = "undo:"  # отменить запись: undo:<ids>
 
@@ -46,12 +46,24 @@ class PendingCosts:
     invalid_lines: list[str]
 
 
-def build_confirmation_keyboard() -> InlineKeyboardMarkup:
-    """Создаёт клавиатуру подтверждения."""
+def generate_session_id() -> str:
+    """Генерирует уникальный идентификатор сессии подтверждения."""
+    import time
+    return str(int(time.time() * 1000))  # timestamp в миллисекундах
+
+
+def build_confirmation_keyboard(session_id: str) -> InlineKeyboardMarkup:
+    """Создаёт клавиатуру подтверждения с уникальным session_id."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, записать", callback_data=CALLBACK_CONFIRM_SAVE),
-            InlineKeyboardButton(text="❌ Нет, отменить", callback_data=CALLBACK_CANCEL_SAVE),
+            InlineKeyboardButton(
+                text="✅ Да, записать",
+                callback_data=f"{CALLBACK_CONFIRM_PREFIX}{session_id}",
+            ),
+            InlineKeyboardButton(
+                text="❌ Нет, отменить",
+                callback_data=f"{CALLBACK_CANCEL_PREFIX}{session_id}",
+            ),
         ]
     ])
 
@@ -205,22 +217,25 @@ async def handle_message(message: Message, state: FSMContext):
 
     # Если есть невалидные строки - запрашиваем подтверждение
     if result.invalid_lines:
+        session_id = generate_session_id()
         logger.info(
-            "Partial parse, asking confirmation: user_id=%s, valid=%d, invalid=%d",
+            "Partial parse, asking confirmation: user_id=%s, valid=%d, invalid=%d, session=%s",
             message.from_user.id,
             len(result.valid_lines),
             len(result.invalid_lines),
+            session_id,
         )
 
-        # Сохраняем данные в FSM (сохраняем past_mode_*)
+        # Сохраняем данные в FSM (сохраняем past_mode_*) + session_id
         await state.set_state(SaveCostsStates.waiting_confirmation)
         await state.update_data(
             valid_costs=[{"name": c.name, "amount": str(c.amount)} for c in result.valid_lines],
             invalid_lines=result.invalid_lines,
+            confirmation_session_id=session_id,
         )
 
         confirmation_msg = format_confirmation_message(result.valid_lines, result.invalid_lines)
-        keyboard = build_confirmation_keyboard()
+        keyboard = build_confirmation_keyboard(session_id)
 
         await message.answer(confirmation_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
         return
@@ -251,13 +266,27 @@ async def handle_message(message: Message, state: FSMContext):
         await message.answer(MSG_DB_ERROR)
 
 
-@router.callback_query(F.data == CALLBACK_CONFIRM_SAVE, SaveCostsStates.waiting_confirmation)
+@router.callback_query(F.data.startswith(CALLBACK_CONFIRM_PREFIX), SaveCostsStates.waiting_confirmation)
 async def handle_confirm_save(callback: CallbackQuery, state: FSMContext):
     """Обработчик подтверждения сохранения."""
-    if not callback.from_user or not isinstance(callback.message, Message):
+    if not callback.from_user or not isinstance(callback.message, Message) or not callback.data:
         return
 
+    # Проверяем session_id
+    callback_session_id = callback.data.removeprefix(CALLBACK_CONFIRM_PREFIX)
     data = await state.get_data()
+    stored_session_id = data.get("confirmation_session_id")
+
+    if callback_session_id != stored_session_id:
+        logger.warning(
+            "Session mismatch: callback=%s, stored=%s, user=%s",
+            callback_session_id,
+            stored_session_id,
+            callback.from_user.id,
+        )
+        await callback.answer("⚠️ Это сообщение устарело. Используйте последнее.", show_alert=True)
+        return
+
     valid_costs_data = data.get("valid_costs", [])
 
     if not valid_costs_data:
@@ -283,7 +312,7 @@ async def handle_confirm_save(callback: CallbackQuery, state: FSMContext):
 
     # Очищаем только состояние подтверждения, сохраняем past_mode_*
     await state.set_state(None)
-    await state.update_data(valid_costs=None, invalid_lines=None)
+    await state.update_data(valid_costs=None, invalid_lines=None, confirmation_session_id=None)
 
     if saved_ids is not None:
         count = len(valid_costs)
@@ -306,10 +335,25 @@ async def handle_confirm_save(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(MSG_DB_ERROR, reply_markup=None)
 
 
-@router.callback_query(F.data == CALLBACK_CANCEL_SAVE, SaveCostsStates.waiting_confirmation)
+@router.callback_query(F.data.startswith(CALLBACK_CANCEL_PREFIX), SaveCostsStates.waiting_confirmation)
 async def handle_cancel_save(callback: CallbackQuery, state: FSMContext):
     """Обработчик отмены сохранения."""
-    if not callback.from_user or not isinstance(callback.message, Message):
+    if not callback.from_user or not isinstance(callback.message, Message) or not callback.data:
+        return
+
+    # Проверяем session_id
+    callback_session_id = callback.data.removeprefix(CALLBACK_CANCEL_PREFIX)
+    data = await state.get_data()
+    stored_session_id = data.get("confirmation_session_id")
+
+    if callback_session_id != stored_session_id:
+        logger.warning(
+            "Session mismatch on cancel: callback=%s, stored=%s, user=%s",
+            callback_session_id,
+            stored_session_id,
+            callback.from_user.id,
+        )
+        await callback.answer("⚠️ Это сообщение устарело. Используйте последнее.", show_alert=True)
         return
 
     logger.info("User %s cancelled saving costs", callback.from_user.id)
