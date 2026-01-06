@@ -19,6 +19,7 @@ class TestMain:
             mock_settings.bot_token = "test-token"
             mock_bot = MagicMock()
             mock_bot.session.close = AsyncMock()
+            mock_bot.session.closed = False
             mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
@@ -43,6 +44,7 @@ class TestMain:
         ):
             mock_bot = MagicMock()
             mock_bot.session.close = AsyncMock()
+            mock_bot.session.closed = False
             mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
@@ -64,6 +66,7 @@ class TestMain:
         ):
             mock_bot = MagicMock()
             mock_bot.session.close = AsyncMock()
+            mock_bot.session.closed = False
             mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
@@ -84,6 +87,7 @@ class TestMain:
         ):
             mock_bot = MagicMock()
             mock_bot.session.close = AsyncMock()
+            mock_bot.session.closed = False  # Сессия не закрыта
             mock_bot_class.return_value = mock_bot
             mock_dp = MagicMock()
             mock_dp.start_polling = AsyncMock()
