@@ -71,7 +71,7 @@ jobs:
           --health-retries=10
 
     env:
-      BOT_TOKEN: dummy-token
+      BOT_TOKEN: 01234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ
       DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test_db
 
     steps:
