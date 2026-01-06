@@ -138,6 +138,31 @@ async def get_user_available_months(
     return [(int(row.year), int(row.month)) for row in rows]
 
 
+async def delete_messages_by_ids(
+    session: AsyncSession,
+    message_ids: list[int],
+    user_id: int,
+) -> int:
+    """Удаляет сообщения по списку ID (только для указанного пользователя).
+    
+    Args:
+        session: сессия БД
+        message_ids: список ID сообщений для удаления
+        user_id: ID пользователя (для безопасности - удаляем только свои)
+    
+    Returns:
+        Количество удалённых записей
+    """
+    from sqlalchemy import delete
+    
+    result = await session.execute(
+        delete(Message)
+        .where(Message.id.in_(message_ids))
+        .where(Message.user_id == user_id)
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
 async def save_message(
     session: AsyncSession,
     user_id: int,

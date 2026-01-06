@@ -5,7 +5,7 @@ from sqlalchemy import select
 
 from bot.db.dependencies import get_session
 from bot.db.models import Message
-from bot.routers.messages import handle_message
+from bot.routers.messages import handle_message, handle_undo
 
 
 class MockUser:
@@ -79,7 +79,9 @@ class TestHandleMessageE2E:
 
         # Проверяем ответ пользователю
         assert len(mock_message.answers) == 1
-        assert "1 расход успешно сохранено" in mock_message.answers[0]["text"]
+        response_text = mock_message.answers[0]["text"]
+        assert "Записано 1 расход" in response_text
+        assert "Продукты: 100" in response_text
 
     @pytest.mark.asyncio
     async def test_multiple_costs_saves_all_to_db(self):
@@ -102,7 +104,11 @@ class TestHandleMessageE2E:
 
         # Проверяем ответ
         assert len(mock_message.answers) == 1
-        assert "3 расхода успешно сохранено" in mock_message.answers[0]["text"]
+        response_text = mock_message.answers[0]["text"]
+        assert "Записано 3 расхода" in response_text
+        assert "Продукты: 100" in response_text
+        assert "Вода: 50" in response_text
+        assert "Хлеб: 30" in response_text
 
     @pytest.mark.asyncio
     async def test_invalid_format_does_not_save_to_db(self):
@@ -175,7 +181,9 @@ class TestHandleMessageE2E:
 
         # Проверяем ответ
         assert len(mock_message.answers) == 1
-        assert "1 расход успешно сохранено" in mock_message.answers[0]["text"]
+        response_text = mock_message.answers[0]["text"]
+        assert "Записано 1 расход" in response_text
+        assert "корректировка: -500.50" in response_text
 
     @pytest.mark.asyncio
     async def test_decimal_with_comma_saves_correctly(self):
@@ -271,7 +279,9 @@ class TestConfirmationE2E:
         mock_callback.answer.assert_called_once()
         mock_callback.message.edit_text.assert_called_once()
         edited_text = mock_callback.message.edit_text.call_args[0][0]
-        assert "успешно сохранено" in edited_text
+        assert "Записано 2 расхода" in edited_text
+        assert "Продукты: 100" in edited_text
+        assert "Вода: 50" in edited_text
 
     @pytest.mark.asyncio
     async def test_cancel_does_not_save_to_db(self):
@@ -317,6 +327,87 @@ class TestConfirmationE2E:
         mock_callback.message.edit_text.assert_called_once()
         edited_text = mock_callback.message.edit_text.call_args[0][0]
         assert "отменено" in edited_text.lower()
+
+
+class TestUndoE2E:
+    """E2E тесты отмены записей с реальной БД."""
+
+    @pytest.mark.asyncio
+    async def test_undo_deletes_records_from_db(self):
+        """При отмене записи удаляются из БД."""
+        user_id = 66600
+        mock_message = MockMessage("Продукты 100\nВода 50", user_id=user_id)
+        mock_state = MockState()
+
+        # Шаг 1: сохраняем расходы
+        await handle_message(mock_message, mock_state)
+
+        # Получаем ID сохранённых записей из callback_data кнопки
+        reply_markup = mock_message.answers[0]["kwargs"]["reply_markup"]
+        undo_button = reply_markup.inline_keyboard[0][0]
+        callback_data = undo_button.callback_data
+        
+        # Проверяем что записи в БД
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id)
+            result = await session.execute(stmt)
+            messages_before = result.scalars().all()
+            assert len(messages_before) == 2
+
+        # Шаг 2: отменяем
+        mock_callback = create_mock_callback(user_id=user_id, data=callback_data)
+        await handle_undo(mock_callback)
+
+        # Проверяем что записи удалены из БД
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id)
+            result = await session.execute(stmt)
+            messages_after = result.scalars().all()
+            assert len(messages_after) == 0
+
+        # Проверяем сообщение об отмене
+        mock_callback.message.edit_text.assert_called_once()
+        edited_text = mock_callback.message.edit_text.call_args[0][0]
+        assert "Отменено" in edited_text
+        assert "2" in edited_text
+
+    @pytest.mark.asyncio
+    async def test_undo_only_deletes_own_records(self):
+        """Отмена удаляет только записи указанного пользователя."""
+        user_id_1 = 66601
+        user_id_2 = 66602
+
+        # Пользователь 1 сохраняет расход
+        mock_message_1 = MockMessage("Продукты 100", user_id=user_id_1)
+        mock_state_1 = MockState()
+        await handle_message(mock_message_1, mock_state_1)
+
+        # Пользователь 2 сохраняет расход
+        mock_message_2 = MockMessage("Вода 50", user_id=user_id_2)
+        mock_state_2 = MockState()
+        await handle_message(mock_message_2, mock_state_2)
+
+        # Получаем ID записи пользователя 1
+        reply_markup_1 = mock_message_1.answers[0]["kwargs"]["reply_markup"]
+        callback_data_1 = reply_markup_1.inline_keyboard[0][0].callback_data
+
+        # Пользователь 2 пытается отменить запись пользователя 1
+        mock_callback = create_mock_callback(user_id=user_id_2, data=callback_data_1)
+        await handle_undo(mock_callback)
+
+        # Записи пользователя 1 не должны быть удалены (user_id не совпадает)
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id_1)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            assert len(messages) == 1  # Запись осталась
+
+        # Записи пользователя 2 тоже должны остаться
+        async with get_session() as session:
+            stmt = select(Message).where(Message.user_id == user_id_2)
+            result = await session.execute(stmt)
+            messages = result.scalars().all()
+            assert len(messages) == 1
 
 
 class TestPastModeE2E:

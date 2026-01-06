@@ -4,18 +4,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from bot.constants import MSG_DB_ERROR, MSG_PARSE_ERROR, MSG_SUCCESS
+from bot.constants import MSG_DB_ERROR, MSG_PARSE_ERROR
 from bot.routers.messages import (
     CALLBACK_CANCEL_SAVE,
     CALLBACK_CONFIRM_SAVE,
+    CALLBACK_UNDO_PREFIX,
     SaveCostsStates,
     build_confirmation_keyboard,
+    build_success_keyboard,
     format_confirmation_message,
     format_past_mode_info,
+    format_success_message,
     get_past_mode_date,
     handle_cancel_save,
     handle_confirm_save,
     handle_message,
+    handle_undo,
 )
 from bot.services.message_parser import Cost
 
@@ -70,15 +74,27 @@ class TestHandleMessage:
 
     @pytest.mark.asyncio
     async def test_success_sends_confirmation(self, mock_message, mock_state, mock_session):
-        """Успешное сохранение — отправляется подтверждение."""
-        with patch("bot.routers.messages.get_session") as mock_get_session:
+        """Успешное сохранение — отправляется подтверждение со списком и кнопкой отмены."""
+        mock_saved_message = MagicMock()
+        mock_saved_message.id = 1
+
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.save_message") as mock_save,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_save.return_value = mock_saved_message
 
             await handle_message(mock_message, mock_state)
 
         mock_message.answer.assert_called_once()
         response = mock_message.answer.call_args[0][0]
-        assert response == MSG_SUCCESS.format(count=1, word="расход")
+        # Проверяем формат: "✅ Записано 1 расход:\n\n  • Продукты: 100"
+        assert "Записано 1 расход" in response
+        assert "Продукты: 100" in response
+        # Проверяем что есть кнопка отмены
+        call_kwargs = mock_message.answer.call_args.kwargs
+        assert "reply_markup" in call_kwargs
 
     @pytest.mark.asyncio
     async def test_mixed_lines_asks_confirmation(self, mock_message, mock_state, mock_session):
@@ -424,3 +440,144 @@ class TestHandleMessageWithPastMode:
             mock_save.assert_called_once()
             call_kwargs = mock_save.call_args.kwargs
             assert call_kwargs["created_at"] is None
+
+
+# ========== Тесты для отмены действия ==========
+
+
+class TestBuildSuccessKeyboard:
+    """Тесты построения клавиатуры успешного сообщения."""
+
+    def test_has_undo_button(self):
+        """Клавиатура содержит кнопку отмены."""
+        keyboard = build_success_keyboard([1, 2, 3])
+
+        assert len(keyboard.inline_keyboard) == 1
+        assert len(keyboard.inline_keyboard[0]) == 1
+        assert "Отменить" in keyboard.inline_keyboard[0][0].text
+
+    def test_callback_data_contains_ids(self):
+        """Callback data содержит ID записей."""
+        keyboard = build_success_keyboard([1, 2, 3])
+
+        callback_data = keyboard.inline_keyboard[0][0].callback_data
+        assert callback_data == f"{CALLBACK_UNDO_PREFIX}1,2,3"
+
+    def test_with_disable_past_button(self):
+        """С флагом include_disable_past добавляется вторая кнопка."""
+        keyboard = build_success_keyboard([1], include_disable_past=True)
+
+        assert len(keyboard.inline_keyboard) == 2
+        assert "Отменить" in keyboard.inline_keyboard[0][0].text
+        assert "Отключить прошлое" in keyboard.inline_keyboard[1][0].text
+
+
+class TestFormatSuccessMessage:
+    """Тесты форматирования сообщения об успехе."""
+
+    def test_contains_count(self):
+        """Сообщение содержит количество."""
+        costs = [Cost(name="Продукты", amount=Decimal("100"))]
+        message = format_success_message(costs, 1)
+
+        assert "Записано 1 расход" in message
+
+    def test_contains_costs_list(self):
+        """Сообщение содержит список расходов."""
+        costs = [
+            Cost(name="Продукты", amount=Decimal("100")),
+            Cost(name="Вода", amount=Decimal("50")),
+        ]
+        message = format_success_message(costs, 2)
+
+        assert "Продукты: 100" in message
+        assert "Вода: 50" in message
+
+    def test_pluralizes_correctly(self):
+        """Правильное склонение."""
+        costs_2 = [Cost(name="A", amount=Decimal("1"))] * 2
+        costs_5 = [Cost(name="A", amount=Decimal("1"))] * 5
+
+        assert "2 расхода" in format_success_message(costs_2, 2)
+        assert "5 расходов" in format_success_message(costs_5, 5)
+
+
+class TestHandleUndo:
+    """Тесты обработчика отмены записей."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.edit_text = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = f"{CALLBACK_UNDO_PREFIX}1,2,3"
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_deletes_messages(self, callback):
+        """Удаляет записи из БД."""
+        mock_session = AsyncMock()
+        mock_session.commit = AsyncMock()
+
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.delete_messages_by_ids") as mock_delete,
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_delete.return_value = 3
+
+            await handle_undo(callback)
+
+            mock_delete.assert_called_once_with(mock_session, [1, 2, 3], 123)
+            mock_session.commit.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_shows_success_message(self, callback):
+        """Показывает сообщение об успешной отмене."""
+        mock_session = AsyncMock()
+        mock_session.commit = AsyncMock()
+
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.delete_messages_by_ids") as mock_delete,
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_delete.return_value = 3
+
+            await handle_undo(callback)
+
+            callback.message.edit_text.assert_called_once()
+            message = callback.message.edit_text.call_args[0][0]
+            assert "Отменено" in message
+            assert "3" in message
+
+    @pytest.mark.asyncio
+    async def test_handles_invalid_callback_data(self, callback):
+        """Обрабатывает некорректные данные."""
+        callback.data = f"{CALLBACK_UNDO_PREFIX}invalid"
+
+        await handle_undo(callback)
+
+        callback.answer.assert_called_once()
+        assert "Ошибка" in callback.answer.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_ids(self, callback):
+        """Обрабатывает пустой список ID."""
+        callback.data = f"{CALLBACK_UNDO_PREFIX}"
+
+        await handle_undo(callback)
+
+        callback.answer.assert_called_once()
+        assert "Нет записей" in callback.answer.call_args[0][0]
