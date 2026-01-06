@@ -19,3 +19,14 @@ def mock_session():
     session = AsyncMock()
     session.add = MagicMock()
     return session
+
+
+@pytest.fixture
+def mock_state():
+    """Создаёт мок FSMContext."""
+    state = AsyncMock()
+    state.get_data = AsyncMock(return_value={})
+    state.set_state = AsyncMock()
+    state.update_data = AsyncMock()
+    state.clear = AsyncMock()
+    return state

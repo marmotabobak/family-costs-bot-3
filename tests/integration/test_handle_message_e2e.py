@@ -28,6 +28,30 @@ class MockMessage:
         self.answers.append({"text": text, "kwargs": kwargs})
 
 
+class MockState:
+    """Мок для FSMContext."""
+
+    def __init__(self):
+        self._state = None
+        self._data = {}
+
+    async def set_state(self, state):
+        self._state = state
+
+    async def get_state(self):
+        return self._state
+
+    async def update_data(self, **kwargs):
+        self._data.update(kwargs)
+
+    async def get_data(self):
+        return self._data
+
+    async def clear(self):
+        self._state = None
+        self._data = {}
+
+
 class TestHandleMessageE2E:
     """E2E тесты обработчика сообщений с реальной БД."""
 
@@ -35,8 +59,9 @@ class TestHandleMessageE2E:
     async def test_successful_single_cost_saves_to_db(self):
         """Успешное сохранение одного расхода в реальную БД."""
         mock_message = MockMessage("Продукты 100", user_id=12345)
+        mock_state = MockState()
 
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Проверяем что сохранилось в БД
         async with get_session() as session:
@@ -56,8 +81,9 @@ class TestHandleMessageE2E:
     async def test_multiple_costs_saves_all_to_db(self):
         """Несколько расходов сохраняются в БД атомарно."""
         mock_message = MockMessage("Продукты 100\nВода 50\nХлеб 30", user_id=54321)
+        mock_state = MockState()
 
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Проверяем что все сохранились
         async with get_session() as session:
@@ -78,8 +104,9 @@ class TestHandleMessageE2E:
     async def test_invalid_format_does_not_save_to_db(self):
         """Невалидное сообщение не сохраняется в БД."""
         mock_message = MockMessage("invalid message without amount", user_id=99999)
+        mock_state = MockState()
 
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Проверяем что ничего не сохранилось
         async with get_session() as session:
@@ -94,40 +121,47 @@ class TestHandleMessageE2E:
         assert "Не удалось распарсить сообщение" in mock_message.answers[0]["text"]
 
     @pytest.mark.asyncio
-    async def test_mixed_valid_invalid_lines(self):
-        """Частично валидное сообщение сохраняет валидные строки."""
+    async def test_mixed_valid_invalid_lines_asks_confirmation(self):
+        """Частично валидное сообщение запрашивает подтверждение."""
         mock_message = MockMessage(
             "Продукты 100\ninvalid line\nВода 50",
             user_id=11111,
         )
+        mock_state = MockState()
 
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
-        # Проверяем что сохранились только валидные
+        # Ничего не должно быть сохранено до подтверждения
         async with get_session() as session:
-            stmt = select(Message).where(Message.user_id == 11111).order_by(Message.id)
+            stmt = select(Message).where(Message.user_id == 11111)
             result = await session.execute(stmt)
             messages = result.scalars().all()
 
-            assert len(messages) == 2
-            assert messages[0].text == "Продукты 100"
-            assert messages[1].text == "Вода 50"
+            assert len(messages) == 0
 
-        # Проверяем ответ - должен содержать и warning, и success
+        # Проверяем что запрошено подтверждение
         assert len(mock_message.answers) == 1
         response = mock_message.answers[0]["text"]
-        assert "Не удалось распарсить строки" in response
+        assert "Не удалось распознать строки" in response
         assert "invalid line" in response
-        assert "2 расхода успешно сохранено" in response
+        assert "Записать" in response
+
+        # Проверяем что есть клавиатура
+        assert "reply_markup" in mock_message.answers[0]["kwargs"]
+
+        # Проверяем что state установлен
+        assert mock_state._state is not None
+        assert len(mock_state._data.get("valid_costs", [])) == 2
 
     @pytest.mark.asyncio
     async def test_no_text_does_not_crash(self):
         """Сообщение без текста не вызывает ошибку."""
         mock_message = MockMessage("", user_id=22222)
         mock_message.text = None  # Симулируем отсутствие текста
+        mock_state = MockState()
 
         # Не должно упасть
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Не должно быть ответа
         assert len(mock_message.answers) == 0
@@ -144,9 +178,10 @@ class TestHandleMessageE2E:
         """Сообщение без from_user не вызывает ошибку."""
         mock_message = MockMessage("Продукты 100", user_id=33333)
         mock_message.from_user = None  # Симулируем отсутствие отправителя
+        mock_state = MockState()
 
         # Не должно упасть
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Не должно быть ответа
         assert len(mock_message.answers) == 0
@@ -155,8 +190,9 @@ class TestHandleMessageE2E:
     async def test_negative_amount_saves_correctly(self):
         """Отрицательная сумма (корректировка) сохраняется."""
         mock_message = MockMessage("корректировка -500.50", user_id=44444)
+        mock_state = MockState()
 
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Проверяем сохранение
         async with get_session() as session:
@@ -174,8 +210,9 @@ class TestHandleMessageE2E:
     async def test_decimal_with_comma_saves_correctly(self):
         """Decimal с запятой корректно сохраняется."""
         mock_message = MockMessage("Молоко 123,45", user_id=55555)
+        mock_state = MockState()
 
-        await handle_message(mock_message)
+        await handle_message(mock_message, mock_state)
 
         # Проверяем сохранение (запятая заменена на точку в тексте)
         async with get_session() as session:
