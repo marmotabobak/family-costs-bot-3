@@ -1,6 +1,6 @@
 # Family Costs Bot
 
-[![CI](https://github.com/marmotabobak/family-costs-bot-3/workflows/CI/badge.svg)](https://github.com/marmotabobak/family-costs-bot-3/actions)
+[![CI/CD](https://github.com/marmotabobak/family-costs-bot-3/workflows/CI%2FCD/badge.svg)](https://github.com/marmotabobak/family-costs-bot-3/actions)
 [![codecov](https://codecov.io/gh/marmotabobak/family-costs-bot-3/branch/master/graph/badge.svg)](https://codecov.io/gh/marmotabobak/family-costs-bot-3)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)

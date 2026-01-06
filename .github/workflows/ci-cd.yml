@@ -1,4 +1,4 @@
-name: CI
+name: CI/CD
 
 on:
   push:
@@ -122,3 +122,27 @@ jobs:
             .coverage
             coverage.xml
             htmlcov/
+
+  # ------------------------------------------------------------
+  # 3. Deploy to production server
+  # ------------------------------------------------------------
+  deploy:
+    needs: tests
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+            git pull origin master
+            docker-compose down
+            docker-compose up -d --build
+            docker-compose exec -T bot alembic upgrade head
+            echo "Deployed at $(date)"
