@@ -66,7 +66,8 @@ bot/
     └── message_parser.py  # Парсинг сообщений
 
 tests/
-├── unit/                  # Unit-тесты (45 тестов)
+├── conftest.py            # Настройка окружения, safety checks
+├── unit/                  # Unit-тесты
 │   ├── conftest.py        # Shared fixtures
 │   ├── test_*.py          # Тесты модулей
 └── integration/           # Интеграционные тесты
@@ -91,7 +92,7 @@ python -m venv venv
 source venv/bin/activate
 
 # Установка зависимостей
-make deps-dev
+make install-dev
 
 # Установка pre-commit хуков
 make hooks
@@ -117,7 +118,7 @@ ENV=dev
 ```bash
 make db        # Запустить БД (PostgreSQL) в контейнере
 make migrate   # Применить миграции БД
-make run       # Запустить бота
+make bot       # Запустить бота
 ```
 
 
@@ -128,12 +129,12 @@ make run       # Запустить бота
 
 ### DEV-окружение
 
-| Команда            | Описание                              |
-|--------------------|---------------------------------------|
-| `make install`     | Установить PROD зависимости           |
-| `make install-dev` | Установить DEV зависимости            |
-| `make db`          | Запустить БД (PostgreSQL) в котейнере |
-| `make run`         | Запустить бота локально (для DEV)     |
+| Команда            | Описание                               |
+|--------------------|----------------------------------------|
+| `make install`     | Установить PROD зависимости            |
+| `make install-dev` | Установить DEV зависимости             |
+| `make db`          | Запустить БД (PostgreSQL) в контейнере |
+| `make bot`         | Запустить бота локально (для DEV)      |
 
 ### Docker
 
@@ -150,10 +151,6 @@ make run       # Запустить бота
 | Команда                  | Описание            |
 |--------------------------|---------------------|
 | `make migrate`           | Применить миграции  |
-| `make migration m="msg"` | Создать миграцию    |
-| `make downgrade`         | Откатить 1 миграцию |
-| `make db-rev`            | Текущая ревизия     |
-| `make db-heads`          | Доступные heads     |
 
 **Качество кода:**
 
@@ -214,13 +211,57 @@ make logs-db     # только postgres
 
 Push в master запрещён (только через PR).
 
-При push в ветку:
+**При push в ветку / PR:**
 1. Линтинг (ruff, mypy) на Python 3.10, 3.11, 3.12
-2. Тесты (с отчётом по покрытию в Codecov)
+2. Тесты с ENV=test (с отчётом по покрытию в Codecov)
 
-При PR:
-1 и 2 шаг аналогично
-3. Деплой на удаленный хост.
+**При merge в master:**
+3. Автоматический деплой на удалённый хост
+
+### Настройка деплоя
+
+Добавьте секреты в GitHub: Settings → Secrets and variables → Actions:
+
+| Секрет           | Описание                  | Пример                  |
+|------------------|---------------------------|-------------------------|
+| `DEPLOY_HOST`    | IP или hostname сервера   | `192.168.1.100`         |
+| `DEPLOY_USER`    | SSH пользователь          | `deploy`                |
+| `DEPLOY_SSH_KEY` | Приватный SSH ключ        | `-----BEGIN OPENSSH...` |
+| `DEPLOY_PORT`    | SSH порт (опционально)    | `22`                    |
+| `DEPLOY_PATH`    | Путь к проекту на сервере | `/home/deploy/bot`      |
+
+### Первоначальная настройка сервера
+
+```bash
+# Клонировать репозиторий
+git clone <repo> /home/deploy/bot
+cd /home/deploy/bot
+
+# Создать .env с production значениями
+cat > .env << EOF
+BOT_TOKEN=your-production-token
+POSTGRES_USER=prod_user
+POSTGRES_PASSWORD=secure_password
+POSTGRES_DB=family_costs
+POSTGRES_PORT=5432
+ENV=prod
+EOF
+
+# Запустить
+docker-compose up -d --build
+```
+
+## Переменная ENV
+
+Переменная `ENV` управляет режимом работы:
+
+| Значение | Описание                                    |
+|----------|---------------------------------------------|
+| `dev`    | Разработка: SQL-логирование включено        |
+| `test`   | Тесты: автоматически устанавливается pytest |
+| `prod`   | Production: SQL-логирование выключено       |
+
+Тесты блокируются при `ENV=prod` для защиты production БД.
 
 ## Лицензия
 

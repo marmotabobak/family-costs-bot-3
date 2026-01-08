@@ -58,25 +58,9 @@ logs-db:
 # Migrations (Alembic)
 # -----------------------------------------------------------
 
-## Create new migration (autogenerate)
-migration:
-	alembic revision --autogenerate -m "$(m)"
-
 ## Apply migrations
 migrate:
 	alembic upgrade head
-
-## Roll back 1 migration
-downgrade:
-	alembic downgrade -1
-
-## Show current Alembic revision
-db-rev:
-	alembic current
-
-## Show available Alembic heads
-db-heads:
-	alembic heads
 
 # -----------------------------------------------------------
 # Code quality
@@ -142,10 +126,6 @@ help:
 	@echo ""
 	@echo "  Database:"
 	@echo "    make migrate     - apply migrations"
-	@echo "    make migration m=\"msg\" - create migration"
-	@echo "    make downgrade   - rollback 1 migration"
-	@echo "    make db-rev      - show current revision"
-	@echo "    make db-heads    - show available heads"
 	@echo ""
 	@echo "  Quality:"
 	@echo "    make lint        - run ruff + mypy"
