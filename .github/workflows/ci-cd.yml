@@ -73,6 +73,7 @@ jobs:
     env:
       BOT_TOKEN: 01234567890:ABCDEFGHIJKLMNOPQRSTUVWXYZ
       DATABASE_URL: postgresql+asyncpg://test:test@127.0.0.1:5432/test_db
+      ENV: test
 
     steps:
       - name: Checkout
@@ -144,5 +145,4 @@ jobs:
             git pull origin master
             docker-compose down
             docker-compose up -d --build
-            docker-compose exec -T bot alembic upgrade head
             echo "Deployed at $(date)"

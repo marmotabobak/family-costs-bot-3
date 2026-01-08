@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings
 
 class Environment(str, Enum):
     dev = "dev"
+    test = "test"
     prod = "prod"
 
 
@@ -60,7 +61,7 @@ class Settings(BaseSettings):
 
     @property
     def debug(self) -> bool:
-        return self.env == Environment.dev
+        return self.env in (Environment.dev, Environment.test)
 
     model_config = {
         "env_file": ".env",

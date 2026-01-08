@@ -16,20 +16,25 @@ DATABASE_URL := $(DATABASE_URL)
 # Development environment
 # -----------------------------------------------------------
 
-## Install only production dependencies
-deps:
+## Install only PROD dependencies
+install:
 	$(PIP) install -r requirements.txt
 
-## Install production + dev dependencies
-deps-dev:
+## Install PROD + DEV dependencies
+install-dev:
 	$(PIP) install -r requirements.txt
 	$(PIP) install -r requirements-dev.txt
 
-## Start PostgreSQL only (for local development)
+## Start only database in Docker container - for DEV only:
 db:
 	docker-compose up -d postgres
 
-## Start all services in Docker (postgres + bot)
+## Start bot locally w/o Docker container - for DEV only:
+bot:
+	$(PYTHON) -m bot.main
+
+
+## Start all services in Docker (database + bot)
 up:
 	docker-compose up -d --build
 
@@ -77,7 +82,7 @@ db-heads:
 # Code quality
 # -----------------------------------------------------------
 
-## Run ruff linter
+## Run linters
 lint:
 	ruff check . --fix
 	mypy .
@@ -86,7 +91,7 @@ lint:
 hooks:
 	pre-commit install
 
-## Run pre-commit on all files
+## Run pre-commit jooks
 pre-commit:
 	pre-commit run --all-files
 
@@ -99,19 +104,12 @@ test:
 	pytest -vv
 
 ## Run tests with coverage
-cov:
+test-cov:
 	pytest --cov=$(SRC) \
 	       --cov-report=term \
 	       --cov-report=html \
 	       --cov-report=xml
 
-# -----------------------------------------------------------
-# Application
-# -----------------------------------------------------------
-
-## Run application
-run:
-	$(PYTHON) -m bot.main
 
 # -----------------------------------------------------------
 # Helpers
@@ -133,7 +131,7 @@ help:
 	@echo "    make deps        - install production deps"
 	@echo "    make deps-dev    - install dev deps"
 	@echo "    make db          - start postgres only (for local dev)"
-	@echo "    make run         - run bot locally"
+	@echo "    make bot         - run bot locally"
 	@echo ""
 	@echo "  Docker:"
 	@echo "    make up          - start all services (postgres + bot)"
@@ -152,9 +150,9 @@ help:
 	@echo "  Quality:"
 	@echo "    make lint        - run ruff + mypy"
 	@echo "    make hooks       - install pre-commit hooks"
-	@echo "    make pre-commit  - run pre-commit on all files"
+	@echo "    make pre-commit  - run pre-commit hooks"
 	@echo "    make test        - run pytest"
-	@echo "    make cov         - run tests with coverage"
+	@echo "    make test-cov         - run tests with coverage"
 	@echo ""
 	@echo "    make clean       - cleanup caches"
 	@echo ""
