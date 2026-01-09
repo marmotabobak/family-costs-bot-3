@@ -138,20 +138,56 @@ async def get_user_available_months(
     return [(int(row.year), int(row.month)) for row in rows]
 
 
+async def delete_messages_by_ids(
+    session: AsyncSession,
+    message_ids: list[int],
+    user_id: int,
+) -> int:
+    """Удаляет сообщения по списку ID (только для указанного пользователя).
+    
+    Args:
+        session: сессия БД
+        message_ids: список ID сообщений для удаления
+        user_id: ID пользователя (для безопасности - удаляем только свои)
+    
+    Returns:
+        Количество удалённых записей
+    """
+    from sqlalchemy import delete
+    
+    result = await session.execute(
+        delete(Message)
+        .where(Message.id.in_(message_ids))
+        .where(Message.user_id == user_id)
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
 async def save_message(
     session: AsyncSession,
     user_id: int,
     text: str,
+    created_at: datetime | None = None,
 ) -> Message:
     """Создает объект сообщения без commit (для batch операций).
     
     Вызывающий код должен сам делать commit.
     Это позволяет сохранять несколько сообщений атомарно в одной транзакции.
+    
+    Args:
+        session: сессия БД
+        user_id: ID пользователя Telegram
+        text: текст расхода
+        created_at: опциональная дата создания (по умолчанию - текущее время)
     """
     message = Message(
         user_id=user_id,
         text=text,
     )
+    
+    # Если передана кастомная дата - устанавливаем её
+    if created_at is not None:
+        message.created_at = created_at  # type: ignore[assignment]
 
     session.add(message)
     await session.flush()  # Получаем id и created_at без commit
