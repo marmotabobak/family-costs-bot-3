@@ -21,7 +21,7 @@ async def main() -> None:
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(
-            parse_mode=ParseMode.MARKDOWN,
+            parse_mode=ParseMode.HTML,
         ),
     )
 

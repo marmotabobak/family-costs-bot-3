@@ -75,6 +75,13 @@ class TestParseMessageValidSingleLine:
             invalid_lines=[],
         )
 
+    def test_special_characters(self):
+        result = parse_message("\\-.!#_@:`<>/ 123.45")
+        assert result == ParseResult(
+            valid_lines=[Cost(name="\\-.!#_@:`<>/", amount=Decimal("123.45"))],
+            invalid_lines=[],
+        )
+
 
 class TestParseMessageMultipleLines:
     def test_multiple_valid_lines(self):
