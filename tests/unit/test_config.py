@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from bot.config import Settings
+from pydantic_settings import SettingsConfigDict
 
 
 class TestSettingsValidation:
@@ -73,12 +74,19 @@ class TestSettingsValidation:
 class TestAllowedUserIdsValidation:
     """Тесты валидации allowed_user_ids."""
 
-    def test_allowed_user_ids_default_empty(self):
+    def test_allowed_user_ids_default_empty(self, monkeypatch):
         """По умолчанию список разрешённых пользователей пуст."""
-        settings = Settings(
+
+        class SettingsWithNoEnv(Settings):
+            model_config = SettingsConfigDict(
+                env_file=None,
+            )
+
+        settings = SettingsWithNoEnv(
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
         )
+
         assert settings.allowed_user_ids == []
 
     def test_allowed_user_ids_from_list(self):
