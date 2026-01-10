@@ -206,7 +206,7 @@ async def handle_message(message: Message, state: FSMContext):
     if result is None:
         logger.warning("Failed to parse message: user_id=%s, text=%r", message.from_user.id, message.text)
         await message.answer(MSG_PARSE_ERROR)
-        await message.answer(HELP_TEXT, parse_mode=ParseMode.MARKDOWN)
+        await message.answer(HELP_TEXT)
         return
 
     # Получаем данные о режиме ввода в прошлое
@@ -237,7 +237,7 @@ async def handle_message(message: Message, state: FSMContext):
         confirmation_msg = format_confirmation_message(result.valid_lines, result.invalid_lines)
         keyboard = build_confirmation_keyboard(session_id)
 
-        await message.answer(confirmation_msg, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+        await message.answer(confirmation_msg, reply_markup=keyboard)
         return
 
     # Все строки валидные - сохраняем сразу
@@ -261,7 +261,8 @@ async def handle_message(message: Message, state: FSMContext):
             saved_ids,
             include_disable_past=bool(past_mode_year and past_mode_month),
         )
-        await message.answer(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
+
+        await message.answer(response_text, reply_markup=keyboard)
     else:
         await message.answer(MSG_DB_ERROR)
 
@@ -329,7 +330,7 @@ async def handle_confirm_save(callback: CallbackQuery, state: FSMContext):
             include_disable_past=bool(past_mode_year and past_mode_month),
         )
         await callback.answer()
-        await callback.message.edit_text(response_text, parse_mode="Markdown", reply_markup=keyboard)
+        await callback.message.edit_text(response_text, parse_mode=ParseMode.MARKDOWN, reply_markup=keyboard)
     else:
         await callback.answer()
         await callback.message.edit_text(MSG_DB_ERROR, reply_markup=None)
