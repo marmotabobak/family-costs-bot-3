@@ -59,7 +59,7 @@ def test_bot() -> Bot:
     """Создает тестовый экземпляр бота (один на модуль)."""
     return Bot(
         token="123456789:AABBCCDDEEFFGGHHIIJJKKLLMMNNOOPPQQRRss",
-        default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN),
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
 
 

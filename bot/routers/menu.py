@@ -14,6 +14,7 @@ from bot.db.repositories.messages import (
     get_unique_user_ids,
     get_user_costs_by_month,
 )
+from aiogram.enums import ParseMode
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -99,7 +100,7 @@ def format_month_report(
 ) -> str:
     """Форматирует отчёт по расходам за месяц."""
     month_name = MONTH_NAMES[month]
-    header = f"*{month_name} {year}*"
+    header = f"<b>{month_name} {year}</b>"
     
     if not costs:
         if is_own:
@@ -108,12 +109,12 @@ def format_month_report(
 
     total = sum(amount for _, amount, _ in costs)
     
-    lines = [header, "", f"*Всего:* {total:.2f}", ""]
+    lines = [header, "", f"<b>Всего:</b> {total:.2f}", ""]
     
     # Сортируем по дате по возрастанию (costs уже отсортированы в репозитории)
     for name, amount, date in costs:
-        date_str = date.strftime("%d.%m")
-        lines.append(f"{date_str} {name} {amount:.2f}")
+        date_str = date.strftime("%d")
+        lines.append(f"{date_str}: {name} {amount:.2f}")
 
     return "\n".join(lines)
 
@@ -258,7 +259,7 @@ async def _show_month_report(
     report = format_month_report(costs, year, month, user_id, is_own)
 
     await callback.answer()
-    await callback.message.answer(report, parse_mode="Markdown")
+    await callback.message.answer(report)
 
 
 async def _show_months_list(callback: CallbackQuery, user_id: int, is_own: bool) -> None:
@@ -424,7 +425,7 @@ async def handle_enter_past_month(callback: CallbackQuery, state: FSMContext):
         f"Все последующие расходы будут внесены на 1-е число месяца: *{month_name} {year}*.\n\n"
         f"Когда захотите отключить режим ввода за прошлые месяца, нажмите кнопку ниже, "
         f"чтобы новые расходы были записаны по умолчанию — на сегодня.",
-        parse_mode="Markdown",
+        parse_mode=ParseMode.MARKDOWN,
         reply_markup=keyboard,
     )
 
