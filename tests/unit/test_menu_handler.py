@@ -140,13 +140,15 @@ class TestFormatMonthReport:
         costs = [
             ("Продукты", Decimal("100.00"), datetime(2024, 1, 15, 10, 0)),
             ("Транспорт", Decimal("50.50"), datetime(2024, 1, 20, 12, 30)),
+            ("\\-.!#_@:`<>/", Decimal("12.34"), datetime(2024, 1, 2, 3, 4)),
         ]
         report = format_month_report(costs, year=2024, month=1, user_id=123, is_own=True)
 
         assert "<b>Январь 2024</b>" in report
-        assert "<b>Всего:</b> 150.50" in report  # total
+        assert "<b>Всего:</b> 162.84" in report  # total
         assert "15: Продукты 100.00" in report
         assert "20: Транспорт 50.50" in report
+        assert "2: \\-.!#_@:`<>/ 12.34" in report
 
 
 class TestMenuCommand:
