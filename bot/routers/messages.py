@@ -29,6 +29,7 @@ from bot.services.message_parser import Cost, parse_message
 from bot.utils import pluralize
 from bot.exceptions import MessageMaxLineLengthExceed, MessageMaxLengthExceed, MessageMaxLinesCountExceed
 
+
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -240,25 +241,32 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext):
     )
 
     if not saved_ids:
-        await callback.message.edit_text(MSG_DB_ERROR)
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(MSG_DB_ERROR)
+        else:
+            await callback.answer(MSG_DB_ERROR, show_alert=True)
         return
 
     await state.clear()
     await state.update_data(last_saved_ids=saved_ids)
 
-    await callback.message.edit_text(
-        format_success_message(valid_costs),
-        reply_markup=build_success_keyboard(),
-        parse_mode=ParseMode.HTML,
-    )
-
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            format_success_message(valid_costs),
+            reply_markup=build_success_keyboard(),
+        )
+    else:
+        await callback.answer(format_success_message(valid_costs))
 
 @router.callback_query(F.data == CALLBACK_CANCEL, SaveCostsStates.waiting_confirmation)
 async def handle_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(
-        "❌ Сохранение отменено. Исправьте строки и отправьте сообщение снова."
-    )
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(
+            "❌ Галя, отмена! Исправьте строки и отправьте сообщение снова."
+        )
+    else:
+        await callback.answer("❌ Галя, отмена! Исправьте строки и отправьте сообщение снова.")
 
 
 @router.callback_query(F.data == CALLBACK_UNDO)
@@ -280,9 +288,11 @@ async def handle_undo(callback: CallbackQuery, state: FSMContext):
             await session.commit()
 
             word = pluralize(deleted, "запись", "записи", "записей")
-            await callback.message.edit_text(
-                f"↩️ Отменено: удалено {deleted} {word}."
-            )
+            if isinstance(callback.message, Message):
+                await callback.message.edit_text(f"↩️ Галя, отмена! Удалено {deleted} {word}.")
+            else:
+                await callback.answer(f"↩️ Галя, отмена! Удалено {deleted} {word}.")
+
         except SQLAlchemyError:
             await session.rollback()
             await callback.answer("Ошибка при удалении", show_alert=True)

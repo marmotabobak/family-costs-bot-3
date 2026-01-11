@@ -19,7 +19,7 @@ from bot.routers.messages import (
     handle_undo,
 )
 from bot.services.message_parser import Cost
-
+from aiogram.types import Message
 
 # ======================================================
 # handle_message
@@ -170,7 +170,10 @@ class TestHandleConfirm:
     async def test_saves_on_confirm(self, mock_state, mock_session):
         cb = MagicMock()
         cb.from_user.id = 123
+        cb.answer = AsyncMock()
+        cb.message = MagicMock(spec=Message)
         cb.message.edit_text = AsyncMock()
+
 
         mock_state.get_data.return_value = {
             "valid_costs": [Cost("Продукты", Decimal("100"))],
@@ -192,6 +195,8 @@ class TestHandleCancel:
     @pytest.mark.asyncio
     async def test_cancel_clears_state(self, mock_state):
         cb = MagicMock()
+        cb.answer = AsyncMock()
+        cb.message = MagicMock(spec=Message)
         cb.message.edit_text = AsyncMock()
 
         await handle_cancel(cb, mock_state)
@@ -209,7 +214,9 @@ class TestHandleUndo:
     async def test_undo_uses_fsm_ids(self):
         cb = MagicMock()
         cb.from_user.id = 123
+        cb.message = MagicMock(spec=Message)
         cb.message.edit_text = AsyncMock()
+
         cb.answer = AsyncMock()
 
         mock_state = AsyncMock()
