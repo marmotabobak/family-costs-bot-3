@@ -2,6 +2,8 @@ import logging
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from bot.exceptions import MessageMaxLengthExceed, MessageMaxLinesCountExceed, MessageMaxLineLengthExceed
+from bot.constants import MAX_MESSAGE_LENGTH, MAX_MESSAGE_LINE_LENGTH, MAX_MESSAGE_LINES_COUNT
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +22,6 @@ class ParseResult:
 
 MESSAGE_RE = re.compile(r"^\s*(?P<text>.+?)\s+(?P<amount>[+-]?\d+(?:[.,]\d+)?)\s*$")
 
-# Лимиты для защиты от DoS атак
-MAX_MESSAGE_LENGTH = 4096  # Telegram limit
-MAX_LINE_LENGTH = 500
-MAX_LINES = 100
-
 
 def parse_message(message: str | None) -> ParseResult | None:
     if not message:
@@ -33,14 +30,14 @@ def parse_message(message: str | None) -> ParseResult | None:
     # Проверка общей длины сообщения
     if len(message) > MAX_MESSAGE_LENGTH:
         logger.warning("Message too long: %d characters", len(message))
-        return None
+        raise MessageMaxLengthExceed
 
     lines = message.splitlines()
 
     # Проверка количества строк
-    if len(lines) > MAX_LINES:
+    if len(lines) > MAX_MESSAGE_LINES_COUNT:
         logger.warning("Too many lines: %d", len(lines))
-        return None
+        raise MessageMaxLinesCountExceed
 
     valid_costs: list[Cost] = []
     invalid_costs: list[str] = []
@@ -51,10 +48,9 @@ def parse_message(message: str | None) -> ParseResult | None:
             continue
 
         # Проверка длины строки
-        if len(line) > MAX_LINE_LENGTH:
+        if len(line) > MAX_MESSAGE_LINE_LENGTH:
             logger.debug("Line too long: %r", line[:100])
-            invalid_costs.append(raw_line[:100] + "...")
-            continue
+            raise MessageMaxLineLengthExceed(raw_line)
 
         match = MESSAGE_RE.match(line)
         if not match:

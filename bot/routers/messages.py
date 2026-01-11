@@ -10,11 +10,19 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 from sqlalchemy.exc import SQLAlchemyError
 
-from bot.constants import HELP_TEXT, MSG_DB_ERROR, MSG_PARSE_ERROR
+from bot.constants import (
+    HELP_TEXT,
+    MSG_DB_ERROR,
+    MSG_PARSE_ERROR,
+    MSG_MESSAGE_MAX_LENGTH,
+    MSG_MESSAGE_MAX_LINES_COUNT,
+    MSG_MESSAGE_MAX_LINE_LENGTH,
+)
 from bot.db.dependencies import get_session
 from bot.db.repositories.messages import delete_messages_by_ids, save_message
 from bot.services.message_parser import Cost, parse_message
 from bot.utils import pluralize
+from bot.exceptions import MessageMaxLinesCountExceed, MessageMaxLengthExceed, MessageMaxLineLengthExceed
 
 # Названия месяцев (дублируем из menu.py для независимости)
 MONTH_NAMES = [
@@ -120,7 +128,7 @@ def format_success_message(costs: list[Cost], count: int) -> str:
 
 def format_confirmation_message(valid_costs: list[Cost], invalid_lines: list[str]) -> str:
     """Форматирует сообщение с запросом подтверждения."""
-    lines = ["⚠️ *Не удалось распознать строки:*", ""]
+    lines = ["⚠️ *Не удалось распознать строки:*", ""]  # TODO: Вынести в константы
 
     for line in invalid_lines:
         lines.append(f"  • {line}")
@@ -202,7 +210,18 @@ async def handle_message(message: Message, state: FSMContext):
     if not message.text or not message.from_user:
         return
 
-    result = parse_message(message.text)
+    try:
+        result = parse_message(message.text)
+    except MessageMaxLinesCountExceed:
+        await message.answer(MSG_MESSAGE_MAX_LINES_COUNT)
+        return
+    except MessageMaxLengthExceed:
+        await message.answer(MSG_MESSAGE_MAX_LENGTH)
+        return
+    except MessageMaxLineLengthExceed as e:
+        await message.answer(f"{MSG_MESSAGE_MAX_LINE_LENGTH} {str(e)[:30]}...")
+        return
+
     if result is None:
         logger.warning("Failed to parse message: user_id=%s, text=%r", message.from_user.id, message.text)
         await message.answer(MSG_PARSE_ERROR)
