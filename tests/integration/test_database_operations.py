@@ -8,7 +8,7 @@ from bot.db.dependencies import get_session
 from bot.db.models import Message
 from bot.db.repositories.messages import save_message
 from bot.services.message_parser import parse_message
-
+from bot.db.repositories.messages import delete_messages_by_ids
 
 class TestFullMessageFlow:
     """Тесты полного E2E flow."""
@@ -269,3 +269,34 @@ class TestConstraints:
 
             assert constraint is not None, "CHECK constraint messages_user_id_positive не найден"
 
+
+class TestDeleteMessages:
+    @pytest.mark.asyncio
+    async def test_delete_only_own_messages(self):
+        user_id = 100
+        other_user_id = 200
+
+        async with get_session() as session:
+            m1 = await save_message(session, user_id, "A")
+            m2 = await save_message(session, user_id, "B")
+            await save_message(session, other_user_id, "C")
+            await session.commit()
+
+        async with get_session() as session:
+            deleted = await delete_messages_by_ids(
+                session,
+                [m1.id, m2.id],
+                user_id,
+            )
+            await session.commit()
+
+        assert deleted == 2
+
+        async with get_session() as session:
+            stmt = select(Message)
+            msgs = (await session.execute(stmt)).scalars().all()
+            texts = [m.text for m in msgs]
+
+            assert "C" in texts
+            assert "A" not in texts
+            assert "B" not in texts
