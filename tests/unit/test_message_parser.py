@@ -1,8 +1,11 @@
 from decimal import Decimal, InvalidOperation
 from unittest.mock import patch
 
-from bot.services.message_parser import Cost, ParseResult, parse_message
+import pytest
 
+from bot.services.message_parser import Cost, ParseResult, parse_message
+from bot.exceptions import MessageMaxLengthExceed, MessageMaxLineLengthExceed, MessageMaxLinesCountExceed
+from bot.constants import MAX_MESSAGE_LENGTH, MAX_MESSAGE_LINES_COUNT, MAX_MESSAGE_LINE_LENGTH
 
 class TestParseMessageReturnsNone:
     def test_none_input(self):
@@ -191,57 +194,45 @@ class TestParseMessageDecimalError:
 class TestMessageLimits:
     """Тесты лимитов на длину сообщений."""
 
-    def test_message_too_long_returns_none(self):
-        """Слишком длинное сообщение возвращает None."""
-        # Создаем сообщение > 4096 символов
+    def test_message_too_long_raises_exception(self):
+        """Слишком длинное сообщение вызывает исключение MessageMaxLengthExceed."""
+        # Создаем сообщение > MAX_MESSAGE_LENGTH символов
         long_message = "Продукты 100\n" * 500
-        assert len(long_message) > 4096
-        
-        result = parse_message(long_message)
-        
-        assert result is None
+        assert len(long_message) > MAX_MESSAGE_LENGTH
 
-    def test_too_many_lines_returns_none(self):
-        """Слишком много строк возвращает None."""
-        # Создаем > 100 строк
-        many_lines = "\n".join([f"Товар{i} 100" for i in range(150)])
-        assert len(many_lines.splitlines()) > 100
-        
-        result = parse_message(many_lines)
-        
-        assert result is None
+        with pytest.raises(MessageMaxLengthExceed):
+            parse_message(long_message)
 
-    def test_line_too_long_marked_as_invalid(self):
+    def test_too_many_lines_raises_exception(self):
+        """Слишком много строк вызывает исключение MessageMaxLengthExceed."""
+        # Создаем > MAX_MESSAGE_LINES_COUNT строк
+        many_lines = "\n".join([f"Товар{i} 100" for i in range(MAX_MESSAGE_LINES_COUNT + 1)])
+        assert len(many_lines.splitlines()) > MAX_MESSAGE_LINES_COUNT
+        
+        with pytest.raises(MessageMaxLinesCountExceed):
+            parse_message(many_lines)
+
+    def test_line_too_long_raises_exception(self):
         """Слишком длинная строка помечается как невалидная."""
-        # Создаем строку > 500 символов
+        # Создаем строку > MAX_MESSAGE_LINE_LENGTH символов
         long_line = "Товар с очень длинным названием " * 50 + " 100"
-        assert len(long_line) > 500
+        assert len(long_line) > MAX_MESSAGE_LINE_LENGTH
         
-        message = f"Продукты 100\n{long_line}\nВода 50"
-        result = parse_message(message)
-        
-        assert result is not None
-        assert len(result.valid_lines) == 2  # Продукты и Вода
-        assert result.valid_lines[0] == Cost(name="Продукты", amount=Decimal("100"))
-        assert result.valid_lines[1] == Cost(name="Вода", amount=Decimal("50"))
-        
-        # Длинная строка должна быть обрезана и помечена как невалидная
-        assert len(result.invalid_lines) == 1
-        assert result.invalid_lines[0].endswith("...")
-        assert len(result.invalid_lines[0]) <= 103  # 100 символов + "..."
+        with pytest.raises(MessageMaxLineLengthExceed):
+            parse_message(long_line)
 
     def test_max_message_length_boundary(self):
         """Сообщение ровно MAX_MESSAGE_LENGTH парсится нормально."""
         # Создаем сообщение ровно 4096 символов, но < 100 строк
         # Используем длинные строки, чтобы не превысить лимит строк
         line = "Товар с длинным названием для теста " + "X" * 30 + " 100\n"
-        num_lines = 4096 // len(line)
+        num_lines = MAX_MESSAGE_LENGTH // len(line)
         message = line * num_lines
-        # Обрезаем до ровно 4096
-        message = message[:4096]
+        # Обрезаем до ровно MAX_MESSAGE_LENGTH
+        message = message[:MAX_MESSAGE_LENGTH]
         
         # Убеждаемся что строк < 100
-        assert len(message.splitlines()) < 100
+        assert len(message.splitlines()) < MAX_MESSAGE_LINES_COUNT
         
         result = parse_message(message)
         
@@ -249,22 +240,22 @@ class TestMessageLimits:
         assert result is not None
 
     def test_max_lines_boundary(self):
-        """Сообщение ровно MAX_LINES парсится нормально."""
-        # Создаем ровно 100 строк
-        message = "\n".join([f"Товар{i} 100" for i in range(100)])
+        """Сообщение ровно MAX_MESSAGE_LINES_COUNT парсится нормально."""
+        # Создаем ровно MAX_MESSAGE_LINES_COUNT строк
+        message = "\n".join([f"Товар{i} 100" for i in range(MAX_MESSAGE_LINES_COUNT)])
         
         result = parse_message(message)
         
         # Должно распарситься
         assert result is not None
-        assert len(result.valid_lines) == 100
+        assert len(result.valid_lines) == MAX_MESSAGE_LINES_COUNT
 
     def test_max_line_length_boundary(self):
         """Строка ровно MAX_LINE_LENGTH парсится нормально."""
         # Создаем строку ровно 500 символов (включая "Товар " и " 100")
-        item_name = "Т" * (500 - len("Товар  100"))
+        item_name = "Т" * (MAX_MESSAGE_LINE_LENGTH - len("Товар  100"))
         line = f"Товар {item_name} 100"
-        assert len(line) == 500
+        assert len(line) == MAX_MESSAGE_LINE_LENGTH
         
         result = parse_message(line)
         
