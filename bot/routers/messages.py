@@ -110,7 +110,6 @@ def format_confirmation_message(
         lines.append(f"• {esc(cost.name)}: {cost.amount}")
 
     lines.append("")
-    count = len(valid_costs)
     lines.append("Записать распарсенные строки?")
 
     return "\n".join(lines)
