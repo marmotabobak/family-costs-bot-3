@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block title %}Загрузка файла{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Загрузите файл с чеками</h2>
+
+    {% if error %}
+    <div class="alert alert-error">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <form action="/import/{{ token }}/upload" method="post" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="file">Выберите JSON файл:</label>
+            <input type="file" id="file" name="file" accept=".json" required>
+        </div>
+
+        <div class="form-help">
+            <p>Экспортируйте чеки из расширения ВкусВилл и загрузите сюда.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Загрузить</button>
+    </form>
+</div>
+{% endblock %}

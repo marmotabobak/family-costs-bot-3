@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block title %}Выбор товаров{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Выберите товары для сохранения</h2>
+
+    {% if error %}
+    <div class="alert alert-error">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <form action="/import/{{ token }}/save" method="post" id="select-form">
+        <div class="controls">
+            <button type="button" class="btn btn-secondary" onclick="selectAll()">Выбрать все</button>
+            <button type="button" class="btn btn-secondary" onclick="deselectAll()">Снять все</button>
+        </div>
+
+        <div class="checks-list">
+            {% for check in checks %}
+            <div class="check-card">
+                <div class="check-header" onclick="toggleCheck({{ loop.index0 }})">
+                    <input type="checkbox"
+                           id="check-{{ loop.index0 }}"
+                           class="check-toggle"
+                           data-check="{{ loop.index0 }}"
+                           onchange="toggleCheckItems({{ loop.index0 }})">
+                    <div class="check-info">
+                        <span class="check-date">{{ check.date_formatted }}</span>
+                        <span class="check-store">{{ check.store }}</span>
+                    </div>
+                    <span class="check-total">{{ check.total }} ₽</span>
+                </div>
+
+                {% set check_idx = loop.index0 %}
+                <div class="check-items" id="items-{{ check_idx }}">
+                    {% for item in check["items"] %}
+                    <label class="item-row">
+                        <input type="checkbox"
+                               name="items"
+                               value="{{ check_idx }}:{{ loop.index0 }}"
+                               class="item-checkbox"
+                               data-check="{{ check_idx }}">
+                        <span class="item-name">{{ item.name }}</span>
+                        <span class="item-quantity">{{ item.quantity }} шт</span>
+                        <span class="item-sum">{{ item.sum }} ₽</span>
+                    </label>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="form-actions">
+            <div class="selected-info">
+                Выбрано: <span id="selected-count">0</span> товаров
+                на сумму <span id="selected-sum">0</span> ₽
+            </div>
+            <button type="submit" class="btn btn-primary">Сохранить выбранные</button>
+        </div>
+    </form>
+</div>
+
+<script>
+function updateStats() {
+    const checkboxes = document.querySelectorAll('input[name="items"]:checked');
+    let count = 0;
+    let sum = 0;
+
+    checkboxes.forEach(cb => {
+        count++;
+        const sumText = cb.closest('.item-row').querySelector('.item-sum').textContent;
+        sum += parseFloat(sumText.replace(' ₽', ''));
+    });
+
+    document.getElementById('selected-count').textContent = count;
+    document.getElementById('selected-sum').textContent = sum.toFixed(2);
+}
+
+function toggleCheckItems(checkIdx) {
+    const checkToggle = document.getElementById('check-' + checkIdx);
+    const items = document.querySelectorAll(`input[data-check="${checkIdx}"].item-checkbox`);
+
+    items.forEach(item => {
+        item.checked = checkToggle.checked;
+    });
+
+    updateStats();
+}
+
+function toggleCheck(checkIdx) {
+    const checkToggle = document.getElementById('check-' + checkIdx);
+    checkToggle.checked = !checkToggle.checked;
+    toggleCheckItems(checkIdx);
+}
+
+function selectAll() {
+    document.querySelectorAll('.check-toggle').forEach(cb => cb.checked = true);
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = true);
+    updateStats();
+}
+
+function deselectAll() {
+    document.querySelectorAll('.check-toggle').forEach(cb => cb.checked = false);
+    document.querySelectorAll('.item-checkbox').forEach(cb => cb.checked = false);
+    updateStats();
+}
+
+// Update stats when individual items change
+document.querySelectorAll('.item-checkbox').forEach(cb => {
+    cb.addEventListener('change', updateStats);
+});
+</script>
+{% endblock %}
