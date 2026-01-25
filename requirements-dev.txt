@@ -7,3 +7,4 @@ pydantic[mypy]
 alembic~=1.17.0
 pre-commit~=4.0.0
 aioresponses~=0.7.0
+httpx~=0.28.1

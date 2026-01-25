@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Успешно сохранено{% endblock %}
+
+{% block content %}
+<div class="card success-card">
+    <div class="success-icon">✓</div>
+
+    <h2>Данные сохранены!</h2>
+
+    <div class="success-stats">
+        <div class="stat">
+            <span class="stat-value">{{ saved_count }}</span>
+            <span class="stat-label">товаров</span>
+        </div>
+        <div class="stat">
+            <span class="stat-value">{{ "%.2f"|format(total_amount) }} ₽</span>
+            <span class="stat-label">общая сумма</span>
+        </div>
+    </div>
+
+    <p class="success-message">
+        Расходы добавлены в базу данных.
+        Вы можете закрыть эту страницу и вернуться в Telegram.
+    </p>
+
+    <a href="/import/{{ token }}" class="btn btn-secondary">Загрузить ещё</a>
+</div>
+{% endblock %}
