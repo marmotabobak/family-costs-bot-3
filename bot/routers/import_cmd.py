@@ -1,3 +1,5 @@
+import logging
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -5,6 +7,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from bot.config import settings
 from bot.web.app import generate_import_token
 
+logger = logging.getLogger(__name__)
 router = Router()
 
 
@@ -16,6 +19,7 @@ async def import_command(message: Message):
 
     token = generate_import_token(message.from_user.id)
     import_url = f"{settings.web_base_url}/import/{token}"
+    logger.debug("Generated import token for user %s: %s", message.from_user.id, import_url)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Загрузить чеки", url=import_url)]])
 

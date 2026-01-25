@@ -160,6 +160,12 @@ async def handle_message(message: Message, state: FSMContext):
     if not message.text or not message.from_user:
         return
 
+    logger.debug(
+        "Received message from user %s: %s",
+        message.from_user.id,
+        message.text[:50] + "..." if len(message.text) > 50 else message.text,
+    )
+
     try:
         result = parse_message(message.text)
     except MessageMaxLinesCountExceed:
@@ -209,6 +215,7 @@ async def handle_message(message: Message, state: FSMContext):
         await message.answer(MSG_DB_ERROR)
         return
 
+    logger.debug("Saved %d costs for user %s: %s", len(saved_ids), message.from_user.id, saved_ids)
     await state.update_data(last_saved_ids=saved_ids)
 
     await message.answer(

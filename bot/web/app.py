@@ -1,6 +1,7 @@
 """Web UI for importing VkusVill checks."""
 
 import json
+import logging
 import secrets
 from datetime import datetime
 from pathlib import Path
@@ -15,6 +16,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from bot.config import Environment, settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.messages import save_message
+
+logger = logging.getLogger(__name__)
 
 # Token storage: token -> {user_id, created_at, data}
 # In production, use Redis or DB
@@ -43,6 +46,7 @@ def generate_import_token(user_id: int) -> str:
         "created_at": datetime.now(),
         "data": None,
     }
+    logger.debug("Generated import token for user %s", user_id)
     return token
 
 
@@ -175,7 +179,11 @@ async def save_selected(
                     created_at=item["date"],
                 )
             await db_session.commit()
+            logger.debug(
+                "Saved %d items for user %s via web import", len(items_to_save), session["user_id"]
+            )
         except SQLAlchemyError:
+            logger.exception("DB error during web import for user %s", session["user_id"])
             await db_session.rollback()
             checks = session["data"]["checks"]
             for check in checks:
