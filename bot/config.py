@@ -5,6 +5,7 @@ from typing import Any
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
+
 class Environment(str, Enum):
     dev = "dev"
     test = "test"
@@ -16,6 +17,7 @@ class Settings(BaseSettings):
     database_url: str
     env: Environment = Environment.prod
     allowed_user_ids: list[int] | str = Field(default_factory=list)
+    web_base_url: str = "http://localhost:8000"
 
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
@@ -56,9 +58,7 @@ class Settings(BaseSettings):
 
         # Проверяем что это PostgreSQL
         if not v.startswith(("postgresql://", "postgresql+asyncpg://")):
-            raise ValueError(
-                "DATABASE_URL должен начинаться с 'postgresql://' или 'postgresql+asyncpg://'"
-            )
+            raise ValueError("DATABASE_URL должен начинаться с 'postgresql://' или 'postgresql+asyncpg://'")
 
         return v
 
