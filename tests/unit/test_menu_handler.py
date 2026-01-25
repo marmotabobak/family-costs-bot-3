@@ -293,6 +293,16 @@ class TestHandleUserCosts:
         response = callback.message.answer.call_args[0][0]
         assert "456" in response
 
+    @pytest.mark.asyncio
+    async def test_invalid_user_id_shows_error(self, callback):
+        """Некорректный user_id показывает ошибку."""
+        callback.data = f"{CALLBACK_USER_COSTS_PREFIX}not_a_number"
+
+        await handle_user_costs(callback)
+
+        callback.answer.assert_called_once_with("Ошибка: некорректный ID пользователя")
+        callback.message.answer.assert_not_called()
+
 
 class TestHandlePeriodSelection:
     """Тесты обработчика выбора периода."""
@@ -352,6 +362,100 @@ class TestHandlePeriodSelection:
 
             callback.answer.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_returns_early_without_data(self):
+        """Выходит если callback.data пустой."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = None
+        cb.answer = AsyncMock()
+
+        await handle_period_selection(cb)
+
+        cb.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_format_returns_error(self, callback):
+        """Неверный формат callback_data показывает ошибку."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}invalid_format"
+
+        await handle_period_selection(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_invalid_user_id_returns_error(self, callback):
+        """Некорректный user_id показывает ошибку."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}not_a_number:this_month"
+
+        await handle_period_selection(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_prev_month_shows_report(self, callback):
+        """Выбор 'Прошлый месяц' показывает отчёт."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}123:prev_month"
+
+        mock_session = AsyncMock()
+        mock_costs = [("Продукты", Decimal("100.00"), datetime.now())]
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs:
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_costs.return_value = mock_costs
+
+            await handle_period_selection(callback)
+
+            callback.answer.assert_called_once()
+            callback.message.answer.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_prev_month_january_goes_to_december(self, callback):
+        """В январе 'Прошлый месяц' показывает декабрь прошлого года."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}123:prev_month"
+
+        mock_session = AsyncMock()
+        mock_costs = []
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs, \
+             patch("bot.routers.menu.datetime") as mock_datetime:
+
+            mock_now = MagicMock()
+            mock_now.year = 2026
+            mock_now.month = 1  # January
+            mock_datetime.now.return_value = mock_now
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_costs.return_value = mock_costs
+
+            await handle_period_selection(callback)
+
+            # Проверяем что вызван с декабрём 2025
+            mock_get_costs.assert_called_once()
+            call_args = mock_get_costs.call_args
+            assert call_args[0][2] == 2025  # year
+            assert call_args[0][3] == 12    # month
+
+    @pytest.mark.asyncio
+    async def test_unknown_period_returns_error(self, callback):
+        """Неизвестный тип периода показывает ошибку."""
+        callback.data = f"{CALLBACK_PERIOD_PREFIX}123:unknown_period"
+
+        await handle_period_selection(callback)
+
+        callback.answer.assert_called_once_with("Неизвестный период")
+
 
 class TestHandleMonthSelection:
     """Тесты обработчика выбора конкретного месяца."""
@@ -394,6 +498,62 @@ class TestHandleMonthSelection:
 
             response = callback.message.answer.call_args[0][0]
             assert "Январь 2024" in response
+
+    @pytest.mark.asyncio
+    async def test_returns_early_without_data(self):
+        """Выходит если callback.data пустой."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = None
+        cb.answer = AsyncMock()
+
+        await handle_month_selection(cb)
+
+        cb.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_format_returns_error(self, callback):
+        """Неверный формат callback_data показывает ошибку."""
+        callback.data = f"{CALLBACK_MONTH_PREFIX}invalid"
+
+        await handle_month_selection(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_invalid_user_id_returns_error(self, callback):
+        """Некорректный user_id показывает ошибку."""
+        callback.data = f"{CALLBACK_MONTH_PREFIX}not_a_number:2024:1"
+
+        await handle_month_selection(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_invalid_year_returns_error(self, callback):
+        """Некорректный год показывает ошибку."""
+        callback.data = f"{CALLBACK_MONTH_PREFIX}123:not_a_year:1"
+
+        await handle_month_selection(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_invalid_month_returns_error(self, callback):
+        """Некорректный месяц показывает ошибку."""
+        callback.data = f"{CALLBACK_MONTH_PREFIX}123:2024:not_a_month"
+
+        await handle_month_selection(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
 
 
 # ========== Тесты для ввода расходов за другой месяц ==========
@@ -509,6 +669,103 @@ class TestHandleEnterPast:
         assert "Выберите год" in call_args[0][0]
         assert "reply_markup" in call_args.kwargs
 
+    @pytest.mark.asyncio
+    async def test_returns_early_without_user(self):
+        """Выходит если нет from_user."""
+        from aiogram.types import CallbackQuery
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = None
+        cb.answer = AsyncMock()
+
+        await handle_enter_past(cb)
+
+        cb.answer.assert_not_called()
+
+
+class TestHandleEnterPastYear:
+    """Тесты обработчика выбора года для ввода в прошлое."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.answer = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = f"{CALLBACK_ENTER_PAST_YEAR}2024"
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_shows_months_selection(self, callback):
+        """Показывает выбор месяца."""
+        from bot.routers.menu import handle_enter_past_year
+
+        await handle_enter_past_year(callback)
+
+        callback.answer.assert_called_once()
+        callback.message.answer.assert_called_once()
+
+        call_args = callback.message.answer.call_args
+        assert "2024" in call_args[0][0]
+        assert "reply_markup" in call_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_returns_early_without_user(self):
+        """Выходит если нет from_user."""
+        from aiogram.types import CallbackQuery
+        from bot.routers.menu import handle_enter_past_year
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = None
+        cb.data = None
+        cb.answer = AsyncMock()
+
+        await handle_enter_past_year(cb)
+
+        cb.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_year_returns_error(self, callback):
+        """Некорректный год показывает ошибку."""
+        from bot.routers.menu import handle_enter_past_year
+
+        callback.data = f"{CALLBACK_ENTER_PAST_YEAR}not_a_year"
+
+        await handle_enter_past_year(callback)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_no_available_months_shows_alert(self, callback):
+        """Если нет доступных прошлых месяцев, показывает предупреждение."""
+        from bot.routers.menu import handle_enter_past_year
+
+        # В январе текущего года нет прошлых месяцев
+        callback.data = f"{CALLBACK_ENTER_PAST_YEAR}2026"
+
+        with patch("bot.routers.menu.datetime") as mock_datetime:
+            mock_now = MagicMock()
+            mock_now.year = 2026
+            mock_now.month = 1  # January
+            mock_datetime.now.return_value = mock_now
+
+            await handle_enter_past_year(callback)
+
+            callback.answer.assert_called_once_with(
+                "Нет доступных прошлых месяцев для этого года",
+                show_alert=True,
+            )
+
 
 class TestHandleEnterPastMonth:
     """Тесты обработчика выбора месяца для ввода в прошлое."""
@@ -559,6 +816,55 @@ class TestHandleEnterPastMonth:
         assert "Внимание" in response
         assert "Июнь 2024" in response
         assert "1-е число" in response
+
+    @pytest.mark.asyncio
+    async def test_returns_early_without_data(self):
+        """Выходит если callback.data пустой."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.data = None
+        cb.answer = AsyncMock()
+
+        mock_state = AsyncMock()
+
+        await handle_enter_past_month(cb, mock_state)
+
+        cb.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_format_returns_error(self, callback, mock_state):
+        """Неверный формат callback_data показывает ошибку."""
+        callback.data = f"{CALLBACK_ENTER_PAST_MONTH}invalid"
+
+        await handle_enter_past_month(callback, mock_state)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_invalid_year_returns_error(self, callback, mock_state):
+        """Некорректный год показывает ошибку."""
+        callback.data = f"{CALLBACK_ENTER_PAST_MONTH}not_a_year:6"
+
+        await handle_enter_past_month(callback, mock_state)
+
+        callback.answer.assert_called_once_with("Ошибка")
+
+    @pytest.mark.asyncio
+    async def test_invalid_month_returns_error(self, callback, mock_state):
+        """Некорректный месяц показывает ошибку."""
+        callback.data = f"{CALLBACK_ENTER_PAST_MONTH}2024:not_a_month"
+
+        await handle_enter_past_month(callback, mock_state)
+
+        callback.answer.assert_called_once_with("Ошибка")
 
 
 class TestHandleDisablePast:
@@ -616,3 +922,143 @@ class TestHandleDisablePast:
         response = callback.message.edit_text.call_args[0][0]
         assert "Прошлое ушло" in response
         assert "сегодня" in response
+
+    @pytest.mark.asyncio
+    async def test_returns_early_without_user(self):
+        """Выходит если нет from_user."""
+        from aiogram.types import CallbackQuery
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = None
+        cb.answer = AsyncMock()
+
+        mock_state = AsyncMock()
+
+        await handle_disable_past(cb, mock_state)
+
+        cb.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_state(self, callback):
+        """Корректно обрабатывает пустой state."""
+        mock_state = AsyncMock()
+        mock_state.get_data = AsyncMock(return_value={})
+        mock_state.set_data = AsyncMock()
+
+        await handle_disable_past(callback, mock_state)
+
+        callback.answer.assert_called_once()
+        # Не должен вызывать set_data если нет past_mode_*
+        mock_state.set_data.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_preserves_other_state_data(self, callback):
+        """Сохраняет другие данные в state при отключении режима."""
+        mock_state = AsyncMock()
+        mock_state.get_data = AsyncMock(return_value={
+            "past_mode_year": 2024,
+            "past_mode_month": 6,
+            "other_key": "other_value",
+        })
+        mock_state.set_data = AsyncMock()
+
+        await handle_disable_past(callback, mock_state)
+
+        new_data = mock_state.set_data.call_args[0][0]
+        assert "other_key" in new_data
+        assert new_data["other_key"] == "other_value"
+
+
+class TestShowMonthsList:
+    """Тесты для _show_months_list."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.answer = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_empty_months_shows_message(self, callback):
+        """Пустой список месяцев показывает сообщение."""
+        from bot.routers.menu import _show_months_list
+
+        mock_session = AsyncMock()
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months:
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_months.return_value = []
+
+            await _show_months_list(callback, user_id=123, is_own=True)
+
+            callback.answer.assert_called_once()
+            response = callback.message.answer.call_args[0][0]
+            assert "Нет данных" in response
+
+    @pytest.mark.asyncio
+    async def test_empty_months_other_user_shows_user_id(self, callback):
+        """Пустой список месяцев для чужого пользователя показывает его ID."""
+        from bot.routers.menu import _show_months_list
+
+        mock_session = AsyncMock()
+
+        with patch("bot.routers.menu.get_session") as mock_get_session, \
+             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months:
+
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_months.return_value = []
+
+            await _show_months_list(callback, user_id=456, is_own=False)
+
+            response = callback.message.answer.call_args[0][0]
+            assert "456" in response
+
+
+class TestShowMonthReport:
+    """Тесты для _show_month_report."""
+
+    @pytest.fixture
+    def callback(self):
+        """Фикстура CallbackQuery."""
+        from aiogram.types import CallbackQuery, Message, User
+
+        user = MagicMock(spec=User)
+        user.id = 123
+
+        msg = MagicMock(spec=Message)
+        msg.answer = AsyncMock()
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.from_user = user
+        cb.message = msg
+        cb.answer = AsyncMock()
+
+        return cb
+
+    @pytest.mark.asyncio
+    async def test_returns_early_without_message(self):
+        """Выходит если message не является Message."""
+        from aiogram.types import CallbackQuery
+        from bot.routers.menu import _show_month_report
+
+        cb = MagicMock(spec=CallbackQuery)
+        cb.message = None  # Не Message
+
+        await _show_month_report(cb, user_id=123, year=2024, month=1, is_own=True)
+
+        # Не должен вызывать ничего
+        # Просто проверяем что не падает
