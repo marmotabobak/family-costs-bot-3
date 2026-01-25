@@ -154,16 +154,17 @@ async def save_selected(
     checks = session["data"]["checks"]
 
     for item_key in selected_items:
-        check_idx, item_idx = map(int, item_key.split(":"))
-        check = checks[check_idx]
-        item = check["items"][item_idx]
-        items_to_save.append({
-            "name": item["name"],
-            "amount": item["sum"],
-            "date": datetime.fromisoformat(check["date"]),
-            "source": "vkusvill",
-            "store": check["store"],
-        })
+        if isinstance(item_key, str):
+            check_idx, item_idx = map(int, item_key.split(":"))
+            check = checks[check_idx]
+            item = check["items"][item_idx]
+            items_to_save.append({
+                "name": item["name"],
+                "amount": item["sum"],
+                "date": datetime.fromisoformat(check["date"]),
+                "source": "vkusvill",
+                "store": check["store"],
+            })
 
     # TODO: Save to database using session["user_id"]
     saved_count = len(items_to_save)
