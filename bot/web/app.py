@@ -68,10 +68,7 @@ async def upload_page(request: Request, token: str):
     if not session:
         raise HTTPException(status_code=404, detail="Ссылка недействительна")
 
-    return templates.TemplateResponse(
-        "upload.html",
-        {"request": request, "token": token},
-    )
+    return templates.TemplateResponse(request, "upload.html", {"token": token})
 
 
 @app.post("/import/{token}/upload")
@@ -91,16 +88,12 @@ async def handle_upload(
         data = json.loads(content.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         return templates.TemplateResponse(
-            "upload.html",
-            {"request": request, "token": token, "error": f"Ошибка чтения файла: {e}"},
+            request, "upload.html", {"token": token, "error": f"Ошибка чтения файла: {e}"}
         )
 
     # Validate structure
     if "checks" not in data:
-        return templates.TemplateResponse(
-            "upload.html",
-            {"request": request, "token": token, "error": "Неверный формат файла"},
-        )
+        return templates.TemplateResponse(request, "upload.html", {"token": token, "error": "Неверный формат файла"})
 
     # Store data in session
     session["data"] = data
@@ -125,10 +118,7 @@ async def select_page(request: Request, token: str):
         dt = datetime.fromisoformat(check["date"])
         check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
 
-    return templates.TemplateResponse(
-        "select.html",
-        {"request": request, "token": token, "checks": checks},
-    )
+    return templates.TemplateResponse(request, "select.html", {"token": token, "checks": checks})
 
 
 @app.post("/import/{token}/save")
@@ -150,13 +140,9 @@ async def save_selected(
             dt = datetime.fromisoformat(check["date"])
             check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
         return templates.TemplateResponse(
+            request,
             "select.html",
-            {
-                "request": request,
-                "token": token,
-                "checks": checks,
-                "error": "Выберите хотя бы один товар",
-            },
+            {"token": token, "checks": checks, "error": "Выберите хотя бы один товар"},
         )
 
     # Parse selected items: "check_idx:item_idx"
@@ -196,9 +182,9 @@ async def save_selected(
                 dt = datetime.fromisoformat(check["date"])
                 check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
             return templates.TemplateResponse(
+                request,
                 "select.html",
                 {
-                    "request": request,
                     "token": token,
                     "checks": checks,
                     "error": "Ошибка сохранения в базу данных. Попробуйте ещё раз.",
@@ -212,11 +198,7 @@ async def save_selected(
     session["data"] = None
 
     return templates.TemplateResponse(
+        request,
         "success.html",
-        {
-            "request": request,
-            "token": token,
-            "saved_count": saved_count,
-            "total_amount": total_amount,
-        },
+        {"token": token, "saved_count": saved_count, "total_amount": total_amount},
     )
