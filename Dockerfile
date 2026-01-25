@@ -11,5 +11,8 @@ COPY bot/ bot/
 COPY migrations/ migrations/
 COPY alembic.ini .
 
+# Expose web UI port
+EXPOSE 8000
+
 # Run the bot
 CMD ["python", "-m", "bot.main"]

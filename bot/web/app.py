@@ -19,6 +19,13 @@ import_sessions: dict[str, dict] = {}
 
 app = FastAPI(title="Family Costs Bot - Import")
 
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for container orchestration."""
+    return {"status": "ok"}
+
+
 # Setup templates and static files
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
