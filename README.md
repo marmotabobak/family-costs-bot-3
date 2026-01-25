@@ -141,6 +141,17 @@ poetry run uvicorn bot.web.app:app --reload --port 8000
 # Затем перейти по ссылке из ответа
 ```
 
+### Web API Endpoints
+
+| Endpoint | Описание |
+|----------|----------|
+| `GET /health` | Health check для мониторинга |
+| `GET /dev/create-token/{user_id}` | Создать токен (только dev) |
+| `GET /import/{token}` | Страница загрузки файла |
+| `POST /import/{token}/upload` | Загрузить JSON с чеками |
+| `GET /import/{token}/select` | Выбор позиций для сохранения |
+| `POST /import/{token}/save` | Сохранить выбранные позиции |
+
 
 - - - - - - - - - -
 

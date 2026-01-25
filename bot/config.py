@@ -1,10 +1,9 @@
 from enum import Enum
 
-from pydantic import field_validator
-from pydantic_settings import BaseSettings
-from pydantic.fields import Field
-from pydantic_settings import SettingsConfigDict
 from typing import Any
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 
 class Environment(str, Enum):
     dev = "dev"
@@ -17,11 +16,6 @@ class Settings(BaseSettings):
     database_url: str
     env: Environment = Environment.prod
     allowed_user_ids: list[int] | str = Field(default_factory=list)
-
-    model_config = SettingsConfigDict(
-        env_ignore_empty=True,
-        env_file=".env"
-    )
 
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
