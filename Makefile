@@ -34,6 +34,11 @@ db:
 bot:
 	$(PYTHON) -m bot.main
 
+## Start web app locally w/o Docker container - for DEV only
+.PHONY: web
+web:
+	uvicorn bot.web.app:app --reload --port 8000
+
 ## Start all services in Docker (database + bot)
 .PHONY: up
 up:
@@ -58,6 +63,11 @@ logs-bot:
 .PHONY: logs-db
 logs-db:
 	docker compose logs -f postgres
+
+## Follow web container logs
+.PHONY: logs-web
+logs-web:
+	docker compose logs -f web
 
 # -----------------------------------------------------------
 # Migrations (Alembic)
@@ -128,13 +138,15 @@ help:
 	@echo "    make install-dev   - install production + dev dependencies"
 	@echo "    make db            - start postgres only (for local dev)"
 	@echo "    make bot           - run bot locally"
+	@echo "    make web           - run web app locally"
 	@echo ""
 	@echo "  Docker:"
-	@echo "    make up            - start all services (postgres + bot)"
+	@echo "    make up            - start all services (postgres + bot + web)"
 	@echo "    make down          - stop all containers"
 	@echo "    make logs          - follow all container logs"
 	@echo "    make logs-bot      - follow bot logs"
 	@echo "    make logs-db       - follow postgres logs"
+	@echo "    make logs-web      - follow web logs"
 	@echo ""
 	@echo "  Database:"
 	@echo "    make migrate       - apply migrations"
