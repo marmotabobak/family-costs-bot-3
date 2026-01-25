@@ -75,6 +75,36 @@ def sample_json():
     }
 
 
+class TestDevRoute:
+    """Tests for dev-only route."""
+
+    def test_dev_route_available_in_test_env(self, client):
+        """Dev route is available when ENV != prod."""
+        response = client.get("/dev/create-token/123456")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "token" in data
+        assert "url" in data
+
+        # Cleanup
+        from bot.web.app import import_sessions
+        import_sessions.pop(data["token"], None)
+
+    def test_dev_route_returns_valid_token(self, client):
+        """Dev route returns working token."""
+        response = client.get("/dev/create-token/999")
+        data = response.json()
+
+        # Token should work for upload page
+        upload_response = client.get(f"/import/{data['token']}")
+        assert upload_response.status_code == 200
+
+        # Cleanup
+        from bot.web.app import import_sessions
+        import_sessions.pop(data["token"], None)
+
+
 class TestGenerateImportToken:
     """Tests for token generation."""
 

@@ -6,10 +6,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+from bot.config import Environment, settings
 
 # Token storage: token -> {user_id, created_at, data}
 # In production, use Redis or DB
@@ -37,6 +39,16 @@ def generate_import_token(user_id: int) -> str:
 def get_session(token: str) -> dict | None:
     """Get import session by token."""
     return import_sessions.get(token)
+
+
+# Dev-only route: only registered in non-prod environments
+if settings.env != Environment.prod:
+
+    @app.get("/dev/create-token/{user_id}")
+    async def dev_create_token(user_id: int):
+        """DEV ONLY: Create import token for testing."""
+        token = generate_import_token(user_id)
+        return {"token": token, "url": f"/import/{token}"}
 
 
 @app.get("/import/{token}", response_class=HTMLResponse)
