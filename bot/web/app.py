@@ -10,8 +10,11 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import SQLAlchemyError
 
 from bot.config import Environment, settings
+from bot.db.dependencies import get_session as get_db_session
+from bot.db.repositories.messages import save_message
 
 # Token storage: token -> {user_id, created_at, data}
 # In production, use Redis or DB
@@ -165,15 +168,43 @@ async def save_selected(
             check_idx, item_idx = map(int, item_key.split(":"))
             check = checks[check_idx]
             item = check["items"][item_idx]
-            items_to_save.append({
-                "name": item["name"],
-                "amount": item["sum"],
-                "date": datetime.fromisoformat(check["date"]),
-                "source": "vkusvill",
-                "store": check["store"],
-            })
+            items_to_save.append(
+                {
+                    "name": item["name"],
+                    "amount": item["sum"],
+                    "date": datetime.fromisoformat(check["date"]),
+                    "source": "vkusvill",
+                    "store": check["store"],
+                }
+            )
 
-    # TODO: Save to database using session["user_id"]
+    # Save to database
+    async with get_db_session() as db_session:
+        try:
+            for item in items_to_save:
+                await save_message(
+                    session=db_session,
+                    user_id=session["user_id"],
+                    text=f"{item['name']} {item['amount']}",
+                    created_at=item["date"],
+                )
+            await db_session.commit()
+        except SQLAlchemyError:
+            await db_session.rollback()
+            checks = session["data"]["checks"]
+            for check in checks:
+                dt = datetime.fromisoformat(check["date"])
+                check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
+            return templates.TemplateResponse(
+                "select.html",
+                {
+                    "request": request,
+                    "token": token,
+                    "checks": checks,
+                    "error": "Ошибка сохранения в базу данных. Попробуйте ещё раз.",
+                },
+            )
+
     saved_count = len(items_to_save)
     total_amount = sum(item["amount"] for item in items_to_save)
 

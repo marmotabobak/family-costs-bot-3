@@ -1,6 +1,7 @@
 """Integration tests for Web API endpoints."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -21,6 +22,18 @@ def valid_token():
     yield token
     # Cleanup
     import_sessions.pop(token, None)
+
+
+@pytest.fixture
+def mock_db_session():
+    """Mock database session for testing save functionality."""
+    mock_session = MagicMock()
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+    mock_session.flush = AsyncMock()
+    mock_session.refresh = AsyncMock()
+    mock_session.add = MagicMock()
+    return mock_session
 
 
 @pytest.fixture
@@ -154,7 +167,7 @@ class TestFullImportFlow:
         assert "Product 2" in response.text
         assert "Product 3" in response.text
 
-    def test_save_selected_items(self, client, valid_token, sample_vkusvill_json):
+    def test_save_selected_items(self, client, valid_token, sample_vkusvill_json, mock_db_session):
         """Save endpoint processes selected items."""
         # Upload first
         json_content = json.dumps(sample_vkusvill_json)
@@ -164,17 +177,21 @@ class TestFullImportFlow:
             follow_redirects=False,
         )
 
-        # Select and save items (check 0, items 0 and 1)
-        response = client.post(
-            f"/import/{valid_token}/save",
-            data={"items": ["0:0", "0:1"]},
-        )
+        with patch("bot.web.app.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # Select and save items (check 0, items 0 and 1)
+            response = client.post(
+                f"/import/{valid_token}/save",
+                data={"items": ["0:0", "0:1"]},
+            )
 
         assert response.status_code == 200
         assert "2" in response.text  # saved count
         assert "250" in response.text  # total amount (100 + 150)
 
-    def test_save_clears_session_data(self, client, valid_token, sample_vkusvill_json):
+    def test_save_clears_session_data(self, client, valid_token, sample_vkusvill_json, mock_db_session):
         """Save endpoint clears session data after saving."""
         # Upload
         json_content = json.dumps(sample_vkusvill_json)
@@ -184,11 +201,15 @@ class TestFullImportFlow:
             follow_redirects=False,
         )
 
-        # Save
-        client.post(
-            f"/import/{valid_token}/save",
-            data={"items": ["0:0"]},
-        )
+        with patch("bot.web.app.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # Save
+            client.post(
+                f"/import/{valid_token}/save",
+                data={"items": ["0:0"]},
+            )
 
         # Session data should be cleared
         session = import_sessions.get(valid_token)
@@ -266,9 +287,9 @@ class TestSessionIsolation:
         token2 = resp2.json()["token"]
 
         # Upload to token1
-        json_content = json.dumps({
-            "checks": [{"id": "1", "uid": "U1", "date": "2026-01-01T10:00", "store": "S", "total": 100, "items": []}]
-        })
+        json_content = json.dumps(
+            {"checks": [{"id": "1", "uid": "U1", "date": "2026-01-01T10:00", "store": "S", "total": 100, "items": []}]}
+        )
         client.post(
             f"/import/{token1}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
@@ -286,9 +307,9 @@ class TestSessionIsolation:
     def test_cannot_access_other_token(self, client, valid_token):
         """Cannot access another user's token."""
         # Upload data to valid_token
-        json_content = json.dumps({
-            "checks": [{"id": "1", "uid": "U1", "date": "2026-01-01T10:00", "store": "S", "total": 100, "items": []}]
-        })
+        json_content = json.dumps(
+            {"checks": [{"id": "1", "uid": "U1", "date": "2026-01-01T10:00", "store": "S", "total": 100, "items": []}]}
+        )
         client.post(
             f"/import/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
