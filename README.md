@@ -11,7 +11,8 @@ Telegram-бот для учёта расходов.
 
 - Пользователи отправляют сообщения с расходами.
 - Бот парсит сообщения и сохраняет расходы в БД (PostgreSQL).
-- Бот готовит сводные данные по внесенным расходам по запросу Пользователей. 
+- Бот готовит сводные данные по внесенным расходам по запросу Пользователей.
+- Web UI для импорта чеков из ВкусВилл. 
 
 ### Формат сообщения
 ```
@@ -35,6 +36,7 @@ Telegram-бот для учёта расходов.
 
 - Python 3.12
 - aiogram 3.x: Telegram Bot API
+- FastAPI + Jinja2: Web UI для импорта чеков
 - SQLAlchemy 2.x (async): ORM
 - asyncpg: async драйвер PostgreSQL
 - Alembic: миграции БД
@@ -49,7 +51,9 @@ Telegram-бот для учёта расходов.
 bot/
 ├── config.py              # Настройки (Pydantic Settings)
 ├── constants.py           # Константы сообщений бота
+├── exceptions.py          # Кастомные исключения
 ├── main.py                # Точка входа
+├── middleware.py          # FSM middleware
 ├── utils.py               # Утилиты (pluralize)
 ├── logging_config.py      # Настройка логирования
 ├── db/
@@ -61,9 +65,14 @@ bot/
 │       └── messages.py    # Репозиторий Message
 ├── routers/
 │   ├── common.py          # /start, /help handlers
+│   ├── menu.py            # /menu и inline-кнопки
 │   └── messages.py        # Обработчик сообщений
-└── services/
-    └── message_parser.py  # Парсинг сообщений
+├── services/
+│   └── message_parser.py  # Парсинг сообщений
+└── web/
+    ├── app.py             # FastAPI приложение (импорт чеков)
+    ├── static/            # CSS стили
+    └── templates/         # Jinja2 шаблоны
 
 tests/
 ├── conftest.py            # Настройка окружения, safety checks
@@ -119,6 +128,17 @@ ENV=dev
 make db        # Запустить БД (PostgreSQL) в контейнере
 make migrate   # Применить миграции БД
 make bot       # Запустить бота
+```
+
+### 4. Web UI для импорта чеков (опционально)
+
+```bash
+# Запустить web-сервер
+poetry run uvicorn bot.web.app:app --reload --port 8000
+
+# Создать токен для импорта (только в dev-режиме)
+# GET http://localhost:8000/dev/create-token/{user_id}
+# Затем перейти по ссылке из ответа
 ```
 
 
@@ -264,10 +284,9 @@ docker-compose up -d --build
 Тесты блокируются при `ENV=prod` для защиты production БД.
 
 ## TODO
-- добавить id бота в иодель данных расходов, чтобы разделить данные от пользователя из разных ботов
+- добавить id бота в модель данных расходов, чтобы разделить данные от пользователя из разных ботов
 - собирать URL сервисом самостоятельно (не импортом из env): данные доступны из других env
 - тестовый стенд с тестовым ботом
-- тесты на bot.exceptions
 
 ## BUGS
 - попытка записи в БД расхода от неавторизованного пользователя
