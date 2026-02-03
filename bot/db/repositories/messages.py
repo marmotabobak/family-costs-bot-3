@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -154,8 +155,9 @@ async def delete_messages_by_ids(
         Количество удалённых записей
     """
     from sqlalchemy import delete
+    from sqlalchemy.engine import Result
     
-    result = await session.execute(
+    result: Result[Any] = await session.execute(
         delete(Message)
         .where(Message.id.in_(message_ids))
         .where(Message.user_id == user_id)

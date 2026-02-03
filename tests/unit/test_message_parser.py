@@ -262,3 +262,233 @@ class TestMessageLimits:
         # Должно распарситься
         assert result is not None
         assert len(result.valid_lines) == 1
+
+
+class TestParseMessageUnicodeAndSpecialCharacters:
+    """Тесты Unicode символов и специальных символов."""
+
+    def test_unicode_characters(self):
+        """Unicode символы в названии расхода."""
+        result = parse_message("Продукты 🍎 100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        assert "🍎" in result.valid_lines[0].name
+
+    def test_emoji_in_name(self):
+        """Emoji в названии расхода."""
+        result = parse_message("Покупка 😊 200")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        assert "😊" in result.valid_lines[0].name
+
+    def test_special_characters_in_name(self):
+        """Специальные символы в названии."""
+        result = parse_message("заказ #123 @test 100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        assert "#123" in result.valid_lines[0].name
+        assert "@test" in result.valid_lines[0].name
+
+    def test_html_characters(self):
+        """HTML символы в названии (должны парситься, но не выполняться)."""
+        result = parse_message("<script>alert('xss')</script> 100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        assert "<script>" in result.valid_lines[0].name
+
+    def test_cyrillic_and_latin_mixed(self):
+        """Смешанные кириллица и латиница."""
+        result = parse_message("Product товар 100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+    def test_chinese_characters(self):
+        """Китайские символы."""
+        result = parse_message("商品 100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+    def test_arabic_characters(self):
+        """Арабские символы."""
+        result = parse_message("منتج 100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+
+class TestParseMessageDecimalEdgeCases:
+    """Тесты граничных случаев для десятичных чисел."""
+
+    def test_decimal_at_start(self):
+        """Десятичная точка в начале числа должна быть невалидной."""
+        # Regex требует хотя бы одну цифру перед точкой
+        result = parse_message("Product .5")
+        assert result is None or len(result.invalid_lines) > 0
+
+    def test_decimal_at_end(self):
+        """Десятичная точка в конце числа должна быть невалидной."""
+        # Regex требует цифры после точки или отсутствие точки
+        result = parse_message("Product 5.")
+        assert result is None or len(result.invalid_lines) > 0
+
+    def test_multiple_decimal_separators_fails(self):
+        """Множественные десятичные разделители должны быть невалидными."""
+        result = parse_message("Product 12.34.56")
+        assert result is None or "12.34.56" in (result.invalid_lines if result else [])
+
+    def test_scientific_notation_fails(self):
+        """Научная нотация должна быть невалидной."""
+        result = parse_message("Product 1e5")
+        assert result is None or "1e5" in (result.invalid_lines if result else [])
+
+    def test_very_large_decimal(self):
+        """Очень большое десятичное число."""
+        result = parse_message("Product 999999999999999.999999999999")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        assert isinstance(result.valid_lines[0].amount, Decimal)
+
+    def test_leading_zeros(self):
+        """Ведущие нули в числе."""
+        result = parse_message("Product 00100")
+        assert result is not None
+        assert result.valid_lines[0].amount == Decimal("100")
+
+    def test_trailing_zeros(self):
+        """Завершающие нули в десятичном числе."""
+        result = parse_message("Product 100.00")
+        assert result is not None
+        assert result.valid_lines[0].amount == Decimal("100.00")
+
+    def test_negative_zero(self):
+        """Отрицательный ноль."""
+        result = parse_message("Product -0")
+        assert result is not None
+        assert result.valid_lines[0].amount == Decimal("-0")
+
+    def test_very_small_decimal(self):
+        """Очень маленькое десятичное число."""
+        result = parse_message("Product 0.000000000001")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+
+class TestParseMessageCostNameEdgeCases:
+    """Тесты граничных случаев для названий расходов."""
+
+    def test_cost_name_with_only_spaces(self):
+        """Название с только пробелами должно быть невалидным."""
+        result = parse_message("   100")
+        # Это может быть интерпретировано как валидное (пустое имя) или невалидное
+        # Проверяем что парсер обрабатывает это корректно
+        assert result is None or len(result.valid_lines) == 0
+
+    def test_cost_name_empty_after_strip(self):
+        """Название пустое после strip."""
+        result = parse_message("  100")
+        # Может быть валидным с пустым именем или невалидным
+        assert result is None or len(result.valid_lines) == 0
+
+    def test_cost_name_with_tabs(self):
+        """Табы вместо пробелов обрабатываются как пробелы (валидно)."""
+        # Regex \s+ обрабатывает табы как пробелы
+        result = parse_message("Product\t100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        assert result.valid_lines[0].name == "Product"
+        assert result.valid_lines[0].amount == Decimal("100")
+
+    def test_cost_name_with_newlines(self):
+        """Название с переносами строк должно быть невалидным."""
+        result = parse_message("Line1\nLine2 100")
+        # Должно быть невалидным или разбито на строки
+        assert result is None or len(result.invalid_lines) > 0 or len(result.valid_lines) == 0
+
+    def test_very_long_cost_name(self):
+        """Очень длинное название (99 символов)."""
+        long_name = "A" * (MAX_MESSAGE_LINE_LENGTH - 10)  # Оставляем место для " 100"
+        line = f"{long_name} 100"
+        assert len(line) <= MAX_MESSAGE_LINE_LENGTH
+        
+        result = parse_message(line)
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+    def test_cost_name_with_many_spaces(self):
+        """Множественные пробелы в названии."""
+        result = parse_message("Product    with    spaces    100")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+        # Пробелы должны быть сохранены в имени
+        assert "   " in result.valid_lines[0].name or "  " in result.valid_lines[0].name
+
+
+class TestParseMessageLineEndings:
+    """Тесты различных окончаний строк."""
+
+    def test_windows_line_endings(self):
+        """Windows окончания строк (\r\n)."""
+        message = "Product1 100\r\nProduct2 200"
+        result = parse_message(message)
+        assert result is not None
+        assert len(result.valid_lines) == 2
+
+    def test_mac_line_endings(self):
+        """Mac окончания строк (\r)."""
+        message = "Product1 100\rProduct2 200"
+        result = parse_message(message)
+        assert result is not None
+        assert len(result.valid_lines) == 2
+
+    def test_unix_line_endings(self):
+        """Unix окончания строк (\n)."""
+        message = "Product1 100\nProduct2 200"
+        result = parse_message(message)
+        assert result is not None
+        assert len(result.valid_lines) == 2
+
+    def test_mixed_line_endings(self):
+        """Смешанные окончания строк."""
+        message = "Product1 100\nProduct2 200\r\nProduct3 300"
+        result = parse_message(message)
+        assert result is not None
+        assert len(result.valid_lines) == 3
+
+
+class TestParseMessageAmountEdgeCases:
+    """Тесты граничных случаев для сумм."""
+
+    def test_very_large_amount(self):
+        """Очень большая сумма."""
+        result = parse_message("Product 999999999999999.99")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+    def test_very_small_amount(self):
+        """Очень маленькая сумма."""
+        result = parse_message("Product 0.01")
+        assert result is not None
+        assert result.valid_lines[0].amount == Decimal("0.01")
+
+    def test_amount_with_many_decimal_places(self):
+        """Сумма с большим количеством десятичных знаков."""
+        result = parse_message("Product 123.12345678901234567890")
+        assert result is not None
+        assert len(result.valid_lines) == 1
+
+    def test_negative_large_amount(self):
+        """Отрицательная большая сумма."""
+        result = parse_message("Correction -999999999999999.99")
+        assert result is not None
+        assert result.valid_lines[0].amount < 0
+
+    def test_amount_with_comma_separator(self):
+        """Сумма с запятой как разделитель."""
+        result = parse_message("Product 123,45")
+        assert result is not None
+        assert result.valid_lines[0].amount == Decimal("123.45")
+
+    def test_amount_with_dot_separator(self):
+        """Сумма с точкой как разделитель."""
+        result = parse_message("Product 123.45")
+        assert result is not None
+        assert result.valid_lines[0].amount == Decimal("123.45")

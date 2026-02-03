@@ -1,6 +1,7 @@
 import logging
 import html
 from datetime import datetime, timezone
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.enums import ParseMode
@@ -254,8 +255,19 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext):
             await callback.answer(MSG_DB_ERROR, show_alert=True)
         return
 
+    # Preserve past mode data before clearing state
+    past_mode_year = data.get("past_mode_year")
+    past_mode_month = data.get("past_mode_month")
+    
     await state.clear()
-    await state.update_data(last_saved_ids=saved_ids)
+    
+    # Restore past mode data and last_saved_ids
+    update_data: dict[str, Any] = {"last_saved_ids": saved_ids}
+    if past_mode_year is not None:
+        update_data["past_mode_year"] = past_mode_year
+    if past_mode_month is not None:
+        update_data["past_mode_month"] = past_mode_month
+    await state.update_data(**update_data)
 
     if isinstance(callback.message, Message):
         await callback.message.edit_text(

@@ -2,13 +2,13 @@
 
 import pytest
 from datetime import datetime, timezone
+from decimal import Decimal
 from sqlalchemy import select, func, text
 
 from bot.db.dependencies import get_session
 from bot.db.models import Message
-from bot.db.repositories.messages import save_message
+from bot.db.repositories.messages import save_message, delete_messages_by_ids
 from bot.services.message_parser import parse_message
-from bot.db.repositories.messages import delete_messages_by_ids
 
 class TestFullMessageFlow:
     """Тесты полного E2E flow."""
@@ -300,3 +300,135 @@ class TestDeleteMessages:
             assert "C" in texts
             assert "A" not in texts
             assert "B" not in texts
+
+
+class TestRepositoryFunctions:
+    """Comprehensive tests for repository functions."""
+
+    @pytest.mark.asyncio
+    async def test_get_user_costs_stats_empty(self):
+        """Статистика для пользователя без расходов."""
+        from bot.db.repositories.messages import get_user_costs_stats
+
+        async with get_session() as session:
+            stats = await get_user_costs_stats(session, 99999)
+            assert stats.count == 0
+            assert stats.total_amount == Decimal("0")
+            assert stats.first_date is None
+            assert stats.last_date is None
+
+    @pytest.mark.asyncio
+    async def test_get_user_costs_stats_with_expenses(self):
+        """Статистика для пользователя с расходами."""
+        from bot.db.repositories.messages import get_user_costs_stats
+
+        user_id = 10001
+        async with get_session() as session:
+            await save_message(session, user_id, "Test1 100")
+            await save_message(session, user_id, "Test2 200")
+            await save_message(session, user_id, "Test3 300")
+            await session.commit()
+
+            stats = await get_user_costs_stats(session, user_id)
+            assert stats.count == 3
+            assert stats.total_amount == Decimal("600")
+            assert stats.first_date is not None
+            assert stats.last_date is not None
+
+    @pytest.mark.asyncio
+    async def test_get_user_recent_costs(self):
+        """Получение последних расходов."""
+        from bot.db.repositories.messages import get_user_recent_costs
+
+        user_id = 10002
+        base_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        async with get_session() as session:
+            await save_message(session, user_id, "First 100", created_at=base_time)
+            await save_message(session, user_id, "Second 200", created_at=base_time.replace(second=1))
+            await save_message(session, user_id, "Third 300", created_at=base_time.replace(second=2))
+            await session.commit()
+
+            costs = await get_user_recent_costs(session, user_id, limit=2)
+            assert len(costs) == 2
+            assert costs[0][0] == "Third"
+            assert costs[1][0] == "Second"
+
+    @pytest.mark.asyncio
+    async def test_get_user_available_months(self):
+        """Получение доступных месяцев."""
+        from bot.db.repositories.messages import get_user_available_months
+
+        user_id = 10003
+        async with get_session() as session:
+            await save_message(
+                session,
+                user_id,
+                "Test1 100",
+                created_at=datetime(2024, 6, 15, tzinfo=timezone.utc),
+            )
+            await save_message(
+                session,
+                user_id,
+                "Test2 200",
+                created_at=datetime(2024, 7, 15, tzinfo=timezone.utc),
+            )
+            await session.commit()
+
+            months = await get_user_available_months(session, user_id)
+            assert len(months) == 2
+            assert (2024, 7) in months
+            assert (2024, 6) in months
+
+    @pytest.mark.asyncio
+    async def test_get_user_costs_stats_with_invalid_text_format(self):
+        """Статистика обрабатывает невалидный формат текста (пропускает)."""
+        from bot.db.repositories.messages import get_user_costs_stats
+
+        user_id = 10004
+        async with get_session() as session:
+            await save_message(session, user_id, "Valid 100")
+            await save_message(session, user_id, "InvalidFormat")  # Нет суммы
+            await save_message(session, user_id, "Another 200")
+            await session.commit()
+
+            stats = await get_user_costs_stats(session, user_id)
+            assert stats.count == 3  # Все записи учитываются
+            assert stats.total_amount == Decimal("300")  # Только валидные суммы
+
+    @pytest.mark.asyncio
+    async def test_get_user_recent_costs_with_invalid_text_format(self):
+        """Последние расходы обрабатывают невалидный формат текста."""
+        from bot.db.repositories.messages import get_user_recent_costs
+
+        user_id = 10005
+        base_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        async with get_session() as session:
+            await save_message(session, user_id, "Valid 100", created_at=base_time)
+            await save_message(session, user_id, "InvalidFormat", created_at=base_time.replace(second=1))  # Нет суммы
+            await save_message(session, user_id, "Another 200", created_at=base_time.replace(second=2))
+            await session.commit()
+
+            costs = await get_user_recent_costs(session, user_id, limit=10)
+            # Должны быть только записи с валидным форматом
+            assert len(costs) == 2
+            assert costs[0][0] == "Another"
+            assert costs[1][0] == "Valid"
+
+    @pytest.mark.asyncio
+    async def test_get_user_costs_by_month_with_invalid_text_format(self):
+        """Расходы за месяц обрабатывают невалидный формат текста."""
+        from bot.db.repositories.messages import get_user_costs_by_month
+
+        user_id = 10006
+        base_time = datetime(2024, 6, 15, tzinfo=timezone.utc)
+        async with get_session() as session:
+            await save_message(session, user_id, "Valid 100", created_at=base_time)
+            await save_message(session, user_id, "InvalidFormat", created_at=base_time.replace(day=16))
+            await save_message(session, user_id, "Another 200", created_at=base_time.replace(day=17))
+            await session.commit()
+
+            costs = await get_user_costs_by_month(session, user_id, 2024, 6)
+            # Должны быть только записи с валидным форматом
+            assert len(costs) == 2
+            assert costs[0][0] == "Valid"
+            assert costs[1][0] == "Another"
