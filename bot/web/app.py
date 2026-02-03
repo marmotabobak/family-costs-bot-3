@@ -16,6 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from bot.config import Environment, settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.messages import save_message
+from bot.web.costs import router as costs_router
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,10 @@ logger = logging.getLogger(__name__)
 # In production, use Redis or DB
 import_sessions: dict[str, dict] = {}
 
-app = FastAPI(title="Family Costs Bot - Import")
+app = FastAPI(title="Family Costs Bot - Web UI")
+
+# Register costs management router
+app.include_router(costs_router)
 
 
 @app.get("/health")

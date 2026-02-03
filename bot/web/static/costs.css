@@ -1,0 +1,186 @@
+/* Costs management styles */
+
+/* Navigation */
+.nav-links {
+    margin-top: 10px;
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+}
+
+.nav-links a {
+    color: #3498db;
+    text-decoration: none;
+    font-weight: 500;
+}
+
+.nav-links a:hover {
+    text-decoration: underline;
+}
+
+.nav-links .logout-link {
+    color: #e74c3c;
+}
+
+/* Card header with title and button */
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.card-header h2 {
+    margin-bottom: 0;
+}
+
+/* Form input */
+.form-input {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 1rem;
+    background: #fff;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.form-hint {
+    display: block;
+    margin-top: 4px;
+    color: #666;
+    font-size: 0.875rem;
+}
+
+/* Alert types */
+.alert-success {
+    background-color: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alert-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+    border: 1px solid #bee5eb;
+}
+
+/* Table */
+.costs-table-wrapper {
+    overflow-x: auto;
+    margin-bottom: 20px;
+}
+
+.costs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+}
+
+.costs-table th,
+.costs-table td {
+    padding: 12px 8px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+
+.costs-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #2c3e50;
+}
+
+.costs-table tr:hover {
+    background: #f8f9fa;
+}
+
+.costs-table .amount {
+    font-weight: 500;
+    color: #27ae60;
+}
+
+.costs-table .amount.negative {
+    color: #e74c3c;
+}
+
+.costs-table .actions {
+    white-space: nowrap;
+}
+
+/* Buttons */
+.btn-small {
+    padding: 6px 12px;
+    font-size: 0.875rem;
+}
+
+.btn-danger {
+    background-color: #e74c3c;
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #c0392b;
+}
+
+.inline-form {
+    display: inline;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    padding-top: 20px;
+    border-top: 1px solid #eee;
+}
+
+.page-info {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+/* Empty state */
+.empty-message {
+    text-align: center;
+    color: #666;
+    padding: 40px 0;
+}
+
+.empty-message a {
+    color: #3498db;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    .nav-links {
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+
+    .card-header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: stretch;
+    }
+
+    .costs-table {
+        font-size: 0.8rem;
+    }
+
+    .costs-table th,
+    .costs-table td {
+        padding: 8px 4px;
+    }
+
+    .pagination {
+        flex-direction: column;
+        gap: 10px;
+    }
+}

@@ -1,0 +1,64 @@
+{% extends "costs/base.html" %}
+
+{% block title %}Список расходов{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>Расходы</h2>
+        <a href="/costs/add" class="btn btn-primary">Добавить</a>
+    </div>
+
+    {% if costs.items %}
+    <div class="costs-table-wrapper">
+        <table class="costs-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Название</th>
+                    <th>Сумма</th>
+                    <th>User ID</th>
+                    <th>Дата</th>
+                    <th>Действия</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for cost in costs.items %}
+                <tr>
+                    <td>{{ cost.id }}</td>
+                    <td>{{ cost.name }}</td>
+                    <td class="amount {% if cost.amount < 0 %}negative{% endif %}">{{ cost.amount }}</td>
+                    <td>{{ cost.user_id }}</td>
+                    <td>{{ cost.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td class="actions">
+                        <a href="/costs/{{ cost.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
+                        <form action="/costs/{{ cost.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Удалить запись?')">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                            <button type="submit" class="btn btn-danger btn-small">Удалить</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if costs.total_pages > 1 %}
+    <div class="pagination">
+        {% if costs.page > 1 %}
+        <a href="/costs?page={{ costs.page - 1 }}" class="btn btn-secondary">&laquo; Назад</a>
+        {% endif %}
+
+        <span class="page-info">Страница {{ costs.page }} из {{ costs.total_pages }} (всего: {{ costs.total }})</span>
+
+        {% if costs.page < costs.total_pages %}
+        <a href="/costs?page={{ costs.page + 1 }}" class="btn btn-secondary">Вперёд &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="empty-message">Расходов пока нет. <a href="/costs/add">Добавьте первый!</a></p>
+    {% endif %}
+</div>
+{% endblock %}
