@@ -14,6 +14,7 @@ from bot.db.repositories.messages import (
     get_unique_user_ids,
     get_user_costs_by_month,
 )
+from bot.web.app import generate_import_token
 from aiogram.enums import ParseMode
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ CALLBACK_ENTER_PAST = "enter_past"  # начать ввод за прошлый 
 CALLBACK_ENTER_PAST_YEAR = "enter_past_year:"  # выбор года для ввода
 CALLBACK_ENTER_PAST_MONTH = "enter_past_month:"  # выбор месяца для ввода
 CALLBACK_DISABLE_PAST = "disable_past"  # отключить режим ввода в прошлое
+CALLBACK_IMPORT = "import"  # импорт чеков из ВкусВилл
 
 # Названия месяцев
 MONTH_NAMES = [
@@ -53,6 +55,9 @@ def build_menu_keyboard(current_user_id: int, all_user_ids: list[int]) -> Inline
                 callback_data=f"{CALLBACK_USER_COSTS_PREFIX}{user_id}",
             )
         ])
+
+    # Кнопка "Импорт чеков"
+    buttons.append([InlineKeyboardButton(text="📥 Импорт чеков", callback_data=CALLBACK_IMPORT)])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -450,5 +455,26 @@ async def handle_disable_past(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await callback.message.edit_text(
         "✅ Прошлое ушло. Дальнейшие расходы будут занесены на сегодня.",
+        reply_markup=None,
+    )
+
+
+@router.callback_query(F.data == CALLBACK_IMPORT)
+async def handle_import(callback: CallbackQuery):
+    """Handle import button click - generate token and send link."""
+    if not callback.from_user:
+        return
+
+    token = generate_import_token(callback.from_user.id)
+    import_url = f"https://marmota-bobak.ru/family-costs-bot/import/vkusvill/{token}"
+
+    logger.info("User %s requested import link", callback.from_user.id)
+
+    await callback.answer()
+    await callback.message.edit_text(
+        f"📥 <b>Импорт чеков из ВкусВилл</b>\n\n"
+        f"Перейдите по ссылке для загрузки файла:\n"
+        f"{import_url}",
+        parse_mode=ParseMode.HTML,
         reply_markup=None,
     )

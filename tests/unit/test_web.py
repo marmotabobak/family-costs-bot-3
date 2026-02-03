@@ -1,6 +1,8 @@
 """Tests for web UI (VkusVill import)."""
 
 import json
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -73,6 +75,20 @@ def sample_json():
             },
         ],
     }
+
+
+@pytest.fixture
+def mock_db_save(monkeypatch):
+    import importlib
+    web_app = importlib.import_module("bot.web.app")
+
+    @asynccontextmanager
+    async def fake_db_session():
+        session = AsyncMock()
+        yield session
+
+    monkeypatch.setattr(web_app, "get_db_session", fake_db_session)
+    monkeypatch.setattr(web_app, "save_message", AsyncMock())
 
 
 class TestDevRoute:
@@ -275,7 +291,7 @@ class TestSelectPage:
 class TestSaveSelected:
     """Tests for saving selected items."""
 
-    def test_save_selected_items(self, client, valid_token, sample_json):
+    def test_save_selected_items(self, client, valid_token, sample_json, mock_db_save):
         """Saving selected items shows success page."""
         # Upload
         json_content = json.dumps(sample_json).encode()
@@ -295,7 +311,7 @@ class TestSaveSelected:
         assert "Данные сохранены" in response.text
         assert "2" in response.text  # 2 items saved
 
-    def test_save_no_items_shows_error(self, client, valid_token, sample_json):
+    def test_save_no_items_shows_error(self, client, valid_token, sample_json, mock_db_save):
         """Saving with no selection shows error."""
         json_content = json.dumps(sample_json).encode()
         client.post(
@@ -312,7 +328,7 @@ class TestSaveSelected:
         assert response.status_code == 200
         assert "Выберите хотя бы один товар" in response.text
 
-    def test_save_clears_session_data(self, client, valid_token, sample_json):
+    def test_save_clears_session_data(self, client, valid_token, sample_json, mock_db_save):
         """After save, session data is cleared."""
         json_content = json.dumps(sample_json).encode()
         client.post(
@@ -328,7 +344,7 @@ class TestSaveSelected:
 
         assert import_sessions[valid_token]["data"] is None
 
-    def test_save_calculates_total(self, client, valid_token, sample_json):
+    def test_save_calculates_total(self, client, valid_token, sample_json, mock_db_save):
         """Success page shows correct total amount."""
         json_content = json.dumps(sample_json).encode()
         client.post(

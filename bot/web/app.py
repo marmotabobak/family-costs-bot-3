@@ -12,8 +12,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
+from sqlalchemy.exc import SQLAlchemyError
 
 from bot.config import Environment, settings
+from bot.db.dependencies import get_session as get_db_session
+from bot.db.repositories.messages import save_message
 from bot.logging_config import setup_logging
 
 # Initialize logging
@@ -203,11 +206,44 @@ async def save_selected(
                 "store": check["store"],
             })
 
-    # TODO: Save to database using session["user_id"]
+    # Save to database
+    async with get_db_session() as db_session:
+        try:
+            logger.info(
+                "Saving items to database: user_id=%d, count=%d",
+                session["user_id"],
+                len(items_to_save),
+            )
+            for item in items_to_save:
+                await save_message(
+                    session=db_session,
+                    user_id=session["user_id"],
+                    text=f"{item['name']} {item['amount']}",
+                    created_at=item["date"],
+                )
+            await db_session.commit()
+            logger.info("Database commit successful")
+        except SQLAlchemyError as e:
+            logger.error("Database error while saving: %s", e, exc_info=True)
+            await db_session.rollback()
+            checks = session["data"]["checks"]
+            for check in checks:
+                dt = datetime.fromisoformat(check["date"])
+                check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
+            return templates.TemplateResponse(
+                "select.html",
+                {
+                    "request": request,
+                    "token": token,
+                    "checks": checks,
+                    "error": "Ошибка сохранения в базу данных. Попробуйте ещё раз.",
+                },
+            )
+
     saved_count = len(items_to_save)
     total_amount = sum(item["amount"] for item in items_to_save)
     logger.info(
-        "Items saved: user_id=%d, count=%d, total_amount=%.2f",
+        "Items saved successfully: user_id=%d, count=%d, total_amount=%.2f",
         session["user_id"],
         saved_count,
         total_amount,

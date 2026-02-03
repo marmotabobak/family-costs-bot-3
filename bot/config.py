@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     database_url: str
     env: Environment = Environment.prod
     allowed_user_ids: list[int] | str = Field(default_factory=list)
+    web_base_url: str = Field(default="https://marmota-bobak.ru")
 
     model_config = SettingsConfigDict(
         env_ignore_empty=True,

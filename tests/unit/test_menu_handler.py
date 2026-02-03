@@ -40,29 +40,32 @@ class TestBuildMenuKeyboard:
         """Пустой список пользователей - только кнопка 'Мои расходы'."""
         keyboard = build_menu_keyboard(current_user_id=123, all_user_ids=[])
 
-        assert len(keyboard.inline_keyboard) == 1
+        assert len(keyboard.inline_keyboard) == 2
         assert keyboard.inline_keyboard[0][0].text == "📊 Мои расходы"
         assert keyboard.inline_keyboard[0][0].callback_data == CALLBACK_MY_COSTS
+        assert keyboard.inline_keyboard[1][0].callback_data == "import"
 
     def test_current_user_excluded(self):
         """Текущий пользователь не показывается в списке."""
         keyboard = build_menu_keyboard(current_user_id=123, all_user_ids=[123, 456, 789])
 
-        assert len(keyboard.inline_keyboard) == 3
+        assert len(keyboard.inline_keyboard) == 4
 
         callback_datas = [row[0].callback_data for row in keyboard.inline_keyboard]
         assert f"{CALLBACK_USER_COSTS_PREFIX}123" not in callback_datas
+        assert "import" in callback_datas
 
     def test_all_users_shown(self):
         """Все пользователи кроме текущего показаны."""
         keyboard = build_menu_keyboard(current_user_id=100, all_user_ids=[123, 456, 789])
 
-        assert len(keyboard.inline_keyboard) == 4
+        assert len(keyboard.inline_keyboard) == 5
 
         callback_datas = [row[0].callback_data for row in keyboard.inline_keyboard[1:]]
         assert f"{CALLBACK_USER_COSTS_PREFIX}123" in callback_datas
         assert f"{CALLBACK_USER_COSTS_PREFIX}456" in callback_datas
         assert f"{CALLBACK_USER_COSTS_PREFIX}789" in callback_datas
+        assert "import" in callback_datas
 
 
 class TestBuildPeriodKeyboard:

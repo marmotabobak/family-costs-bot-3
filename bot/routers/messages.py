@@ -182,7 +182,7 @@ async def save_costs_to_db(
 # MESSAGE HANDLER
 # =====================
 
-@router.message(~Command(commands=["start", "help", "menu"]))
+@router.message(~Command(commands=["start", "help", "menu", "import"]))
 async def handle_message(message: Message, state: FSMContext):
     if not message.text or not message.from_user:
         return
