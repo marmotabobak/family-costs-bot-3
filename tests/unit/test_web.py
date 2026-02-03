@@ -80,7 +80,7 @@ class TestDevRoute:
 
     def test_dev_route_available_in_test_env(self, client):
         """Dev route is available when ENV != prod."""
-        response = client.get("/dev/create-token/123456")
+        response = client.get("/family-costs-bot/import/vkusvill/dev/create-token/123456")
 
         assert response.status_code == 200
         data = response.json()
@@ -93,11 +93,11 @@ class TestDevRoute:
 
     def test_dev_route_returns_valid_token(self, client):
         """Dev route returns working token."""
-        response = client.get("/dev/create-token/999")
+        response = client.get("/family-costs-bot/import/vkusvill/dev/create-token/999")
         data = response.json()
 
         # Token should work for upload page
-        upload_response = client.get(f"/import/{data['token']}")
+        upload_response = client.get(f"/family-costs-bot/import/vkusvill/{data['token']}")
         assert upload_response.status_code == 200
 
         # Cleanup
@@ -145,20 +145,20 @@ class TestUploadPage:
 
     def test_returns_200_with_valid_token(self, client, valid_token):
         """Upload page accessible with valid token."""
-        response = client.get(f"/import/{valid_token}")
+        response = client.get(f"/family-costs-bot/import/vkusvill/{valid_token}")
 
         assert response.status_code == 200
         assert "Загрузите файл" in response.text
 
     def test_returns_404_with_invalid_token(self, client):
         """Upload page returns 404 for invalid token."""
-        response = client.get("/import/invalid-token-123")
+        response = client.get("/family-costs-bot/import/vkusvill/invalid-token-123")
 
         assert response.status_code == 404
 
     def test_contains_upload_form(self, client, valid_token):
         """Page contains file upload form."""
-        response = client.get(f"/import/{valid_token}")
+        response = client.get(f"/family-costs-bot/import/vkusvill/{valid_token}")
 
         assert 'type="file"' in response.text
         assert 'accept=".json"' in response.text
@@ -172,18 +172,18 @@ class TestFileUpload:
         json_content = json.dumps(sample_json).encode()
 
         response = client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
         assert response.status_code == 303
-        assert f"/import/{valid_token}/select" in response.headers["location"]
+        assert f"/family-costs-bot/import/vkusvill/{valid_token}/select" in response.headers["location"]
 
     def test_upload_invalid_json(self, client, valid_token):
         """Uploading invalid JSON shows error."""
         response = client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", b"not json", "application/json")},
         )
 
@@ -195,7 +195,7 @@ class TestFileUpload:
         json_content = json.dumps({"data": []}).encode()
 
         response = client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
         )
 
@@ -207,7 +207,7 @@ class TestFileUpload:
         json_content = json.dumps(sample_json).encode()
 
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
@@ -223,20 +223,20 @@ class TestSelectPage:
         # First upload
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
         # Then access select page
-        response = client.get(f"/import/{valid_token}/select")
+        response = client.get(f"/family-costs-bot/import/vkusvill/{valid_token}/select")
 
         assert response.status_code == 200
         assert "Выберите товары" in response.text
 
     def test_redirects_without_data(self, client, valid_token):
         """Select page redirects to upload if no data."""
-        response = client.get(f"/import/{valid_token}/select", follow_redirects=False)
+        response = client.get(f"/family-costs-bot/import/vkusvill/{valid_token}/select", follow_redirects=False)
 
         assert response.status_code == 307
 
@@ -244,12 +244,12 @@ class TestSelectPage:
         """Select page displays all checks."""
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
-        response = client.get(f"/import/{valid_token}/select")
+        response = client.get(f"/family-costs-bot/import/vkusvill/{valid_token}/select")
 
         assert "Москва б-р Осенний" in response.text
         assert "Москва Рублёвское" in response.text
@@ -260,12 +260,12 @@ class TestSelectPage:
         """Select page displays all items."""
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
-        response = client.get(f"/import/{valid_token}/select")
+        response = client.get(f"/family-costs-bot/import/vkusvill/{valid_token}/select")
 
         assert "Напиток на пихтовой воде" in response.text
         assert "Вафли Голландские" in response.text
@@ -280,14 +280,14 @@ class TestSaveSelected:
         # Upload
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
         # Save selected items (first item from first check, second from second)
         response = client.post(
-            f"/import/{valid_token}/save",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/save",
             data={"items": ["0:0", "1:1"]},
         )
 
@@ -299,13 +299,13 @@ class TestSaveSelected:
         """Saving with no selection shows error."""
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
         response = client.post(
-            f"/import/{valid_token}/save",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/save",
             data={},
         )
 
@@ -316,13 +316,13 @@ class TestSaveSelected:
         """After save, session data is cleared."""
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
         client.post(
-            f"/import/{valid_token}/save",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/save",
             data={"items": ["0:0"]},
         )
 
@@ -332,14 +332,14 @@ class TestSaveSelected:
         """Success page shows correct total amount."""
         json_content = json.dumps(sample_json).encode()
         client.post(
-            f"/import/{valid_token}/upload",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/upload",
             files={"file": ("checks.json", json_content, "application/json")},
             follow_redirects=False,
         )
 
         # Select items with sum 109 + 96 = 205
         response = client.post(
-            f"/import/{valid_token}/save",
+            f"/family-costs-bot/import/vkusvill/{valid_token}/save",
             data={"items": ["0:0", "1:1"]},
         )
 

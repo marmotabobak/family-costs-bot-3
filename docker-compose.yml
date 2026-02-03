@@ -30,5 +30,20 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  web:
+    build: .
+    container_name: family_costs_bot_web
+    command: sh -c "alembic upgrade head && uvicorn bot.web.app:app --host 0.0.0.0 --port 8000"
+    ports:
+      - "127.0.0.1:8001:8000"
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENV: ${ENV:-prod}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   postgres_data:

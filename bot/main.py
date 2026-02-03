@@ -48,6 +48,7 @@ async def main() -> None:
     # Устанавливаем команды бота для меню
     await bot.set_my_commands([
         BotCommand(command="menu", description="Расходы"),
+        BotCommand(command="import", description="Импорт чеков"),
         BotCommand(command="help", description="Справка"),
     ])
 

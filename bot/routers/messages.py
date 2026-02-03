@@ -133,10 +133,23 @@ async def save_costs_to_db(
     costs: list[Cost],
     created_at: datetime | None,
 ) -> list[int] | None:
+    logger.debug(
+        "save_costs_to_db: user_id=%d, costs_count=%d, created_at=%s",
+        user_id,
+        len(costs),
+        created_at,
+    )
     async with get_session() as session:
         try:
             ids: list[int] = []
-            for cost in costs:
+            for idx, cost in enumerate(costs, 1):
+                logger.debug(
+                    "save_costs_to_db: saving cost %d/%d - name=%r, amount=%s",
+                    idx,
+                    len(costs),
+                    cost.name,
+                    cost.amount,
+                )
                 msg = await save_message(
                     session=session,
                     user_id=user_id,
@@ -144,10 +157,23 @@ async def save_costs_to_db(
                     created_at=created_at,
                 )
                 ids.append(int(msg.id))
+            logger.info(
+                "save_costs_to_db: committing transaction - user_id=%d, saved_count=%d, ids=%s",
+                user_id,
+                len(ids),
+                ids,
+            )
             await session.commit()
+            logger.info("save_costs_to_db: transaction committed successfully")
             return ids
-        except SQLAlchemyError:
-            logger.exception("DB error while saving costs")
+        except SQLAlchemyError as e:
+            logger.error(
+                "save_costs_to_db: DB error while saving costs - user_id=%d, costs_count=%d, error=%s",
+                user_id,
+                len(costs),
+                e,
+                exc_info=True,
+            )
             await session.rollback()
             return None
 
