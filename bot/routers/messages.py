@@ -1,6 +1,7 @@
 import logging
 import html
 from datetime import datetime, timezone
+from typing import Any
 
 from aiogram import F, Router
 from aiogram.enums import ParseMode
@@ -155,10 +156,16 @@ async def save_costs_to_db(
 # MESSAGE HANDLER
 # =====================
 
-@router.message(~Command(commands=["start", "help", "menu"]))
+@router.message(~Command(commands=["start", "help", "menu", "import"]))
 async def handle_message(message: Message, state: FSMContext):
     if not message.text or not message.from_user:
         return
+
+    logger.debug(
+        "Received message from user %s: %s",
+        message.from_user.id,
+        message.text[:50] + "..." if len(message.text) > 50 else message.text,
+    )
 
     try:
         result = parse_message(message.text)
@@ -209,6 +216,7 @@ async def handle_message(message: Message, state: FSMContext):
         await message.answer(MSG_DB_ERROR)
         return
 
+    logger.debug("Saved %d costs for user %s: %s", len(saved_ids), message.from_user.id, saved_ids)
     await state.update_data(last_saved_ids=saved_ids)
 
     await message.answer(
@@ -247,8 +255,19 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext):
             await callback.answer(MSG_DB_ERROR, show_alert=True)
         return
 
+    # Preserve past mode data before clearing state
+    past_mode_year = data.get("past_mode_year")
+    past_mode_month = data.get("past_mode_month")
+    
     await state.clear()
-    await state.update_data(last_saved_ids=saved_ids)
+    
+    # Restore past mode data and last_saved_ids
+    update_data: dict[str, Any] = {"last_saved_ids": saved_ids}
+    if past_mode_year is not None:
+        update_data["past_mode_year"] = past_mode_year
+    if past_mode_month is not None:
+        update_data["past_mode_month"] = past_mode_month
+    await state.update_data(**update_data)
 
     if isinstance(callback.message, Message):
         await callback.message.edit_text(

@@ -11,7 +11,7 @@ from bot.config import settings
 from bot.db.session import engine
 from bot.logging_config import setup_logging
 from bot.middleware import AllowedUsersMiddleware
-from bot.routers import common, menu, messages
+from bot.routers import common, import_cmd, menu, messages
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ async def main() -> None:
     dp.message.middleware(AllowedUsersMiddleware())
     dp.include_router(messages.router)
     dp.include_router(menu.router)
+    dp.include_router(import_cmd.router)
     dp.include_router(common.router)
 
     # Graceful shutdown на SIGTERM и SIGINT
@@ -46,10 +47,13 @@ async def main() -> None:
         )
 
     # Устанавливаем команды бота для меню
-    await bot.set_my_commands([
-        BotCommand(command="menu", description="Расходы"),
-        BotCommand(command="help", description="Справка"),
-    ])
+    await bot.set_my_commands(
+        [
+            BotCommand(command="menu", description="Расходы"),
+            BotCommand(command="import", description="Импорт расходов"),
+            BotCommand(command="help", description="Справка"),
+        ]
+    )
 
     logger.info("Bot started. Press Ctrl+C to stop.")
 

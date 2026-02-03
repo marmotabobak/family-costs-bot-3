@@ -22,6 +22,7 @@ from bot.db.repositories.messages import (
 def mock_session():
     """Create mock async session."""
     session = AsyncMock()
+    session.add = MagicMock()  # add() is synchronous in SQLAlchemy
     return session
 
 
@@ -224,9 +225,7 @@ class TestGetUserCostsByMonth:
         mock_result.all.return_value = []
         mock_session.execute.return_value = mock_result
 
-        costs = await get_user_costs_by_month(
-            mock_session, user_id=123, year=2026, month=1
-        )
+        costs = await get_user_costs_by_month(mock_session, user_id=123, year=2026, month=1)
 
         assert costs == []
 
@@ -241,9 +240,7 @@ class TestGetUserCostsByMonth:
         ]
         mock_session.execute.return_value = mock_result
 
-        costs = await get_user_costs_by_month(
-            mock_session, user_id=123, year=2026, month=1
-        )
+        costs = await get_user_costs_by_month(mock_session, user_id=123, year=2026, month=1)
 
         assert len(costs) == 2
         assert costs[0] == ("Молоко", Decimal("100"), jan_date)
@@ -260,9 +257,7 @@ class TestGetUserCostsByMonth:
         ]
         mock_session.execute.return_value = mock_result
 
-        costs = await get_user_costs_by_month(
-            mock_session, user_id=123, year=2026, month=1
-        )
+        costs = await get_user_costs_by_month(mock_session, user_id=123, year=2026, month=1)
 
         assert len(costs) == 1
 
@@ -322,9 +317,7 @@ class TestDeleteMessagesByIds:
         mock_result.rowcount = 3
         mock_session.execute.return_value = mock_result
 
-        count = await delete_messages_by_ids(
-            mock_session, message_ids=[1, 2, 3], user_id=123
-        )
+        count = await delete_messages_by_ids(mock_session, message_ids=[1, 2, 3], user_id=123)
 
         assert count == 3
 
@@ -335,9 +328,7 @@ class TestDeleteMessagesByIds:
         mock_result.rowcount = None
         mock_session.execute.return_value = mock_result
 
-        count = await delete_messages_by_ids(
-            mock_session, message_ids=[1, 2, 3], user_id=123
-        )
+        count = await delete_messages_by_ids(mock_session, message_ids=[1, 2, 3], user_id=123)
 
         assert count == 0
 
@@ -348,9 +339,7 @@ class TestDeleteMessagesByIds:
         mock_result.rowcount = 0
         mock_session.execute.return_value = mock_result
 
-        count = await delete_messages_by_ids(
-            mock_session, message_ids=[], user_id=123
-        )
+        count = await delete_messages_by_ids(mock_session, message_ids=[], user_id=123)
 
         assert count == 0
 
@@ -364,9 +353,7 @@ class TestSaveMessage:
         mock_session.flush = AsyncMock()
         mock_session.refresh = AsyncMock()
 
-        message = await save_message(
-            mock_session, user_id=123, text="Молоко 100"
-        )
+        message = await save_message(mock_session, user_id=123, text="Молоко 100")
 
         assert message.user_id == 123
         assert message.text == "Молоко 100"

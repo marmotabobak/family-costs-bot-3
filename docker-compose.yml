@@ -25,6 +25,22 @@ services:
       BOT_TOKEN: ${BOT_TOKEN}
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ENV: ${ENV:-prod}
+      WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:8000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: .
+    container_name: family_costs_bot_web
+    command: uvicorn bot.web.app:app --host 0.0.0.0 --port 8000
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ENV: ${ENV:-prod}
+    ports:
+      - "${WEB_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy

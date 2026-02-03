@@ -1,6 +1,7 @@
 """Tests for web UI (VkusVill import)."""
 
 import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -100,6 +101,7 @@ class TestDevRoute:
 
         # Cleanup
         from bot.web.app import import_sessions
+
         import_sessions.pop(data["token"], None)
 
     def test_dev_route_returns_valid_token(self, client):
@@ -113,6 +115,7 @@ class TestDevRoute:
 
         # Cleanup
         from bot.web.app import import_sessions
+
         import_sessions.pop(data["token"], None)
 
 
@@ -283,10 +286,22 @@ class TestSelectPage:
         assert "Молоко 2,5%" in response.text
 
 
+@pytest.fixture
+def mock_db_session():
+    """Mock database session for testing save functionality."""
+    mock_session = MagicMock()
+    mock_session.commit = AsyncMock()
+    mock_session.rollback = AsyncMock()
+    mock_session.flush = AsyncMock()
+    mock_session.refresh = AsyncMock()
+    mock_session.add = MagicMock()
+    return mock_session
+
+
 class TestSaveSelected:
     """Tests for saving selected items."""
 
-    def test_save_selected_items(self, client, valid_token, sample_json):
+    def test_save_selected_items(self, client, valid_token, sample_json, mock_db_session):
         """Saving selected items shows success page."""
         # Upload
         json_content = json.dumps(sample_json).encode()
@@ -296,11 +311,16 @@ class TestSaveSelected:
             follow_redirects=False,
         )
 
-        # Save selected items (first item from first check, second from second)
-        response = client.post(
-            f"/import/{valid_token}/save",
-            data={"items": ["0:0", "1:1"]},
-        )
+        # Mock the database session
+        with patch("bot.web.app.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # Save selected items (first item from first check, second from second)
+            response = client.post(
+                f"/import/{valid_token}/save",
+                data={"items": ["0:0", "1:1"]},
+            )
 
         assert response.status_code == 200
         assert "Данные сохранены" in response.text
@@ -323,7 +343,7 @@ class TestSaveSelected:
         assert response.status_code == 200
         assert "Выберите хотя бы один товар" in response.text
 
-    def test_save_clears_session_data(self, client, valid_token, sample_json):
+    def test_save_clears_session_data(self, client, valid_token, sample_json, mock_db_session):
         """After save, session data is cleared."""
         json_content = json.dumps(sample_json).encode()
         client.post(
@@ -332,14 +352,18 @@ class TestSaveSelected:
             follow_redirects=False,
         )
 
-        client.post(
-            f"/import/{valid_token}/save",
-            data={"items": ["0:0"]},
-        )
+        with patch("bot.web.app.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            client.post(
+                f"/import/{valid_token}/save",
+                data={"items": ["0:0"]},
+            )
 
         assert import_sessions[valid_token]["data"] is None
 
-    def test_save_calculates_total(self, client, valid_token, sample_json):
+    def test_save_calculates_total(self, client, valid_token, sample_json, mock_db_session):
         """Success page shows correct total amount."""
         json_content = json.dumps(sample_json).encode()
         client.post(
@@ -348,10 +372,14 @@ class TestSaveSelected:
             follow_redirects=False,
         )
 
-        # Select items with sum 109 + 96 = 205
-        response = client.post(
-            f"/import/{valid_token}/save",
-            data={"items": ["0:0", "1:1"]},
-        )
+        with patch("bot.web.app.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            # Select items with sum 109 + 96 = 205
+            response = client.post(
+                f"/import/{valid_token}/save",
+                data={"items": ["0:0", "1:1"]},
+            )
 
         assert "205" in response.text

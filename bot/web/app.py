@@ -1,6 +1,7 @@
 """Web UI for importing VkusVill checks."""
 
 import json
+import logging
 import secrets
 from datetime import datetime
 from pathlib import Path
@@ -10,8 +11,13 @@ from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.exc import SQLAlchemyError
 
 from bot.config import Environment, settings
+from bot.db.dependencies import get_session as get_db_session
+from bot.db.repositories.messages import save_message
+
+logger = logging.getLogger(__name__)
 
 # Token storage: token -> {user_id, created_at, data}
 # In production, use Redis or DB
@@ -40,6 +46,7 @@ def generate_import_token(user_id: int) -> str:
         "created_at": datetime.now(),
         "data": None,
     }
+    logger.debug("Generated import token for user %s", user_id)
     return token
 
 
@@ -65,10 +72,7 @@ async def upload_page(request: Request, token: str):
     if not session:
         raise HTTPException(status_code=404, detail="Ссылка недействительна")
 
-    return templates.TemplateResponse(
-        "upload.html",
-        {"request": request, "token": token},
-    )
+    return templates.TemplateResponse(request, "upload.html", {"token": token})
 
 
 @app.post("/import/{token}/upload")
@@ -88,16 +92,12 @@ async def handle_upload(
         data = json.loads(content.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         return templates.TemplateResponse(
-            "upload.html",
-            {"request": request, "token": token, "error": f"Ошибка чтения файла: {e}"},
+            request, "upload.html", {"token": token, "error": f"Ошибка чтения файла: {e}"}
         )
 
     # Validate structure
     if "checks" not in data:
-        return templates.TemplateResponse(
-            "upload.html",
-            {"request": request, "token": token, "error": "Неверный формат файла"},
-        )
+        return templates.TemplateResponse(request, "upload.html", {"token": token, "error": "Неверный формат файла"})
 
     # Store data in session
     session["data"] = data
@@ -122,10 +122,7 @@ async def select_page(request: Request, token: str):
         dt = datetime.fromisoformat(check["date"])
         check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
 
-    return templates.TemplateResponse(
-        "select.html",
-        {"request": request, "token": token, "checks": checks},
-    )
+    return templates.TemplateResponse(request, "select.html", {"token": token, "checks": checks})
 
 
 @app.post("/import/{token}/save")
@@ -147,13 +144,9 @@ async def save_selected(
             dt = datetime.fromisoformat(check["date"])
             check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
         return templates.TemplateResponse(
+            request,
             "select.html",
-            {
-                "request": request,
-                "token": token,
-                "checks": checks,
-                "error": "Выберите хотя бы один товар",
-            },
+            {"token": token, "checks": checks, "error": "Выберите хотя бы один товар"},
         )
 
     # Parse selected items: "check_idx:item_idx"
@@ -165,15 +158,47 @@ async def save_selected(
             check_idx, item_idx = map(int, item_key.split(":"))
             check = checks[check_idx]
             item = check["items"][item_idx]
-            items_to_save.append({
-                "name": item["name"],
-                "amount": item["sum"],
-                "date": datetime.fromisoformat(check["date"]),
-                "source": "vkusvill",
-                "store": check["store"],
-            })
+            items_to_save.append(
+                {
+                    "name": item["name"],
+                    "amount": item["sum"],
+                    "date": datetime.fromisoformat(check["date"]),
+                    "source": "vkusvill",
+                    "store": check["store"],
+                }
+            )
 
-    # TODO: Save to database using session["user_id"]
+    # Save to database
+    async with get_db_session() as db_session:
+        try:
+            for item in items_to_save:
+                await save_message(
+                    session=db_session,
+                    user_id=session["user_id"],
+                    text=f"{item['name']} {item['amount']}",
+                    created_at=item["date"],
+                )
+            await db_session.commit()
+            logger.debug(
+                "Saved %d items for user %s via web import", len(items_to_save), session["user_id"]
+            )
+        except SQLAlchemyError:
+            logger.exception("DB error during web import for user %s", session["user_id"])
+            await db_session.rollback()
+            checks = session["data"]["checks"]
+            for check in checks:
+                dt = datetime.fromisoformat(check["date"])
+                check["date_formatted"] = dt.strftime("%d.%m.%Y %H:%M")
+            return templates.TemplateResponse(
+                request,
+                "select.html",
+                {
+                    "token": token,
+                    "checks": checks,
+                    "error": "Ошибка сохранения в базу данных. Попробуйте ещё раз.",
+                },
+            )
+
     saved_count = len(items_to_save)
     total_amount = sum(item["amount"] for item in items_to_save)
 
@@ -181,11 +206,7 @@ async def save_selected(
     session["data"] = None
 
     return templates.TemplateResponse(
+        request,
         "success.html",
-        {
-            "request": request,
-            "token": token,
-            "saved_count": saved_count,
-            "total_amount": total_amount,
-        },
+        {"token": token, "saved_count": saved_count, "total_amount": total_amount},
     )
