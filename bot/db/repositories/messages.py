@@ -172,10 +172,10 @@ async def save_message(
     created_at: datetime | None = None,
 ) -> Message:
     """Создает объект сообщения без commit (для batch операций).
-    
+
     Вызывающий код должен сам делать commit.
     Это позволяет сохранять несколько сообщений атомарно в одной транзакции.
-    
+
     Args:
         session: сессия БД
         user_id: ID пользователя Telegram
@@ -186,7 +186,7 @@ async def save_message(
         user_id=user_id,
         text=text,
     )
-    
+
     # Если передана кастомная дата - устанавливаем её
     if created_at is not None:
         message.created_at = created_at  # type: ignore[assignment]
@@ -196,3 +196,104 @@ async def save_message(
     await session.refresh(message)
 
     return message
+
+
+@dataclass
+class PaginatedCosts:
+    """Результат пагинированного запроса расходов."""
+
+    items: list[Message]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+
+async def get_all_costs_paginated(
+    session: AsyncSession,
+    page: int = 1,
+    per_page: int = 20,
+) -> PaginatedCosts:
+    """Возвращает все расходы с пагинацией (для веб-интерфейса)."""
+    from sqlalchemy import func
+
+    # Получаем общее количество записей
+    count_result = await session.execute(select(func.count(Message.id)))
+    total = count_result.scalar() or 0
+
+    # Вычисляем параметры пагинации
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+    page = max(1, min(page, total_pages))
+    offset = (page - 1) * per_page
+
+    # Получаем записи
+    result = await session.execute(
+        select(Message)
+        .order_by(Message.created_at.desc())
+        .offset(offset)
+        .limit(per_page)
+    )
+    items = list(result.scalars().all())
+
+    return PaginatedCosts(
+        items=items,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=total_pages,
+    )
+
+
+async def get_message_by_id(session: AsyncSession, message_id: int) -> Message | None:
+    """Возвращает сообщение по ID."""
+    result = await session.execute(select(Message).where(Message.id == message_id))
+    return result.scalar_one_or_none()
+
+
+async def update_message(
+    session: AsyncSession,
+    message_id: int,
+    text: str,
+    user_id: int | None = None,
+    created_at: datetime | None = None,
+) -> Message | None:
+    """Обновляет сообщение по ID.
+
+    Args:
+        session: сессия БД
+        message_id: ID сообщения
+        text: новый текст
+        user_id: новый user_id (опционально)
+        created_at: новая дата (опционально)
+
+    Returns:
+        Обновленное сообщение или None если не найдено
+    """
+    message = await get_message_by_id(session, message_id)
+    if message is None:
+        return None
+
+    message.text = text  # type: ignore[assignment]
+    if user_id is not None:
+        message.user_id = user_id  # type: ignore[assignment]
+    if created_at is not None:
+        message.created_at = created_at  # type: ignore[assignment]
+
+    await session.flush()
+    await session.refresh(message)
+    return message
+
+
+async def delete_message_by_id(session: AsyncSession, message_id: int) -> bool:
+    """Удаляет сообщение по ID.
+
+    Returns:
+        True если удалено, False если не найдено
+    """
+    from sqlalchemy import delete
+    from sqlalchemy.engine import Result
+
+    result: Result[Any] = await session.execute(
+        delete(Message).where(Message.id == message_id)
+    )
+    return (result.rowcount or 0) > 0  # type: ignore[attr-defined]

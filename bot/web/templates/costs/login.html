@@ -1,0 +1,24 @@
+{% extends "costs/base.html" %}
+
+{% block title %}Вход{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>Вход в систему</h2>
+
+    {% if error %}
+    <div class="alert alert-error">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <form action="/costs/login" method="post">
+        <div class="form-group">
+            <label for="password">Пароль:</label>
+            <input type="password" id="password" name="password" required autofocus class="form-input">
+        </div>
+
+        <button type="submit" class="btn btn-primary">Войти</button>
+    </form>
+</div>
+{% endblock %}

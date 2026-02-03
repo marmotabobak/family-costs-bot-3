@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     env: Environment = Environment.prod
     allowed_user_ids: list[int] | str = Field(default_factory=list)
     web_base_url: str = "http://localhost:8000"
+    web_password: str = ""
 
     @field_validator("allowed_user_ids", mode="before")
     @classmethod
