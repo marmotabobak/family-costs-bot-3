@@ -1,14 +1,12 @@
-"""Unit tests for costs management web UI."""
+"""Unit tests for costs management web UI and shared auth helpers."""
 
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-from bot.web.costs import (
+from bot.web.auth import (
     SESSION_LIFETIME,
-    CostsResponse,
-    ParsedCost,
     auth_sessions,
     check_rate_limit,
     cleanup_expired_sessions,
@@ -20,10 +18,14 @@ from bot.web.costs import (
     get_session_from_cookie,
     is_authenticated,
     login_attempts,
-    parse_message_to_cost,
     record_login_attempt,
     set_flash_message,
     validate_csrf_token,
+)
+from bot.web.costs import (
+    CostsResponse,
+    ParsedCost,
+    parse_message_to_cost,
 )
 
 
@@ -199,7 +201,6 @@ class TestCleanupExpiredSessions:
 
     def test_removes_expired_sessions(self):
         """Removes sessions older than SESSION_LIFETIME."""
-        # Create expired session
         old_time = datetime.now() - timedelta(seconds=SESSION_LIFETIME + 100)
         token = "test-expired-token"
         auth_sessions[token] = {"authenticated": True, "created_at": old_time}
@@ -412,7 +413,7 @@ class TestValidateCsrfToken:
         request = MagicMock()
         request.cookies.get.return_value = session_token
 
-        with patch("bot.web.costs.secrets.compare_digest") as mock_compare:
+        with patch("bot.web.auth.secrets.compare_digest") as mock_compare:
             mock_compare.return_value = True
             validate_csrf_token(request, csrf)
             mock_compare.assert_called_once_with(csrf, csrf)
