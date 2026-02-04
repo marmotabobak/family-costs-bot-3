@@ -6,7 +6,7 @@
 <div class="card">
     <div class="card-header">
         <h2>Расходы</h2>
-        <a href="/costs/add" class="btn btn-primary">Добавить</a>
+        <a href="{{ root_path }}/costs/add" class="btn btn-primary">Добавить</a>
     </div>
 
     {% if costs.items %}
@@ -31,8 +31,8 @@
                     <td>{{ cost.user_id }}</td>
                     <td>{{ cost.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
                     <td class="actions">
-                        <a href="/costs/{{ cost.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
-                        <form action="/costs/{{ cost.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Удалить запись?')">
+                        <a href="{{ root_path }}/costs/{{ cost.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
+                        <form action="{{ root_path }}/costs/{{ cost.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Удалить запись?')">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                             <button type="submit" class="btn btn-danger btn-small">Удалить</button>
                         </form>
@@ -46,19 +46,19 @@
     {% if costs.total_pages > 1 %}
     <div class="pagination">
         {% if costs.page > 1 %}
-        <a href="/costs?page={{ costs.page - 1 }}" class="btn btn-secondary">&laquo; Назад</a>
+        <a href="{{ root_path }}/costs?page={{ costs.page - 1 }}" class="btn btn-secondary">&laquo; Назад</a>
         {% endif %}
 
         <span class="page-info">Страница {{ costs.page }} из {{ costs.total_pages }} (всего: {{ costs.total }})</span>
 
         {% if costs.page < costs.total_pages %}
-        <a href="/costs?page={{ costs.page + 1 }}" class="btn btn-secondary">Вперёд &raquo;</a>
+        <a href="{{ root_path }}/costs?page={{ costs.page + 1 }}" class="btn btn-secondary">Вперёд &raquo;</a>
         {% endif %}
     </div>
     {% endif %}
 
     {% else %}
-    <p class="empty-message">Расходов пока нет. <a href="/costs/add">Добавьте первый!</a></p>
+    <p class="empty-message">Расходов пока нет. <a href="{{ root_path }}/costs/add">Добавьте первый!</a></p>
     {% endif %}
 </div>
 {% endblock %}

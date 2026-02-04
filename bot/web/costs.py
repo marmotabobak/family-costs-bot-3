@@ -30,6 +30,7 @@ router = APIRouter(prefix="/costs", tags=["costs"])
 # Setup templates
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+templates.env.globals["root_path"] = settings.web_root_path
 
 # In-memory session storage (in production use Redis or DB)
 auth_sessions: dict[str, dict] = {}
@@ -236,7 +237,7 @@ async def login_page(request: Request):
     cleanup_old_rate_limits()
 
     if is_authenticated(request):
-        return RedirectResponse(url="/costs", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
     return templates.TemplateResponse(
         request, "costs/login.html", {"authenticated": False}
@@ -292,7 +293,7 @@ async def login(request: Request, password: str = Form(...)):
         "csrf_token": csrf_token,
     }
 
-    response = RedirectResponse(url="/costs", status_code=303)
+    response = RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
@@ -312,7 +313,7 @@ async def logout(request: Request):
     if token and token in auth_sessions:
         del auth_sessions[token]
 
-    response = RedirectResponse(url="/costs/login", status_code=303)
+    response = RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
     response.delete_cookie(key=SESSION_COOKIE)
     return response
 
@@ -324,7 +325,7 @@ async def logout(request: Request):
 async def costs_list(request: Request, page: int = 1):
     """Show paginated list of all costs."""
     if not is_authenticated(request):
-        return RedirectResponse(url="/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
 
     # Validate page parameter
     if page < 1:
@@ -362,7 +363,7 @@ async def costs_list(request: Request, page: int = 1):
 async def add_cost_form(request: Request):
     """Show add cost form."""
     if not is_authenticated(request):
-        return RedirectResponse(url="/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
 
     return templates.TemplateResponse(
         request,
@@ -386,7 +387,7 @@ async def add_cost(
 ):
     """Handle add cost form submission."""
     if not is_authenticated(request):
-        return RedirectResponse(url="/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
 
     # Validate CSRF token
     if not validate_csrf_token(request, csrf_token):
@@ -438,14 +439,14 @@ async def add_cost(
             )
 
     set_flash_message(request, "Расход успешно добавлен", "success")
-    return RedirectResponse(url="/costs", status_code=303)
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
 
 @router.get("/{cost_id}/edit", response_class=HTMLResponse)
 async def edit_cost_form(request: Request, cost_id: int):
     """Show edit cost form."""
     if not is_authenticated(request):
-        return RedirectResponse(url="/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
 
     async with get_db_session() as session:
         message = await get_message_by_id(session, cost_id)
@@ -477,7 +478,7 @@ async def edit_cost(
 ):
     """Handle edit cost form submission."""
     if not is_authenticated(request):
-        return RedirectResponse(url="/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
 
     # Validate CSRF token
     if not validate_csrf_token(request, csrf_token):
@@ -538,7 +539,7 @@ async def edit_cost(
             )
 
     set_flash_message(request, "Расход успешно обновлён", "success")
-    return RedirectResponse(url="/costs", status_code=303)
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
 
 @router.post("/{cost_id}/delete")
@@ -549,7 +550,7 @@ async def delete_cost(
 ):
     """Handle delete cost."""
     if not is_authenticated(request):
-        return RedirectResponse(url="/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
 
     # Validate CSRF token
     if not validate_csrf_token(request, csrf_token):
@@ -568,7 +569,7 @@ async def delete_cost(
             logger.exception("Error deleting cost: %s", e)
             await session.rollback()
             set_flash_message(request, "Ошибка удаления", "error")
-            return RedirectResponse(url="/costs", status_code=303)
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
     set_flash_message(request, "Расход успешно удалён", "success")
-    return RedirectResponse(url="/costs", status_code=303)
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)

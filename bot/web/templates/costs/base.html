@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Расходы{% endblock %} | Family Costs Bot</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link rel="stylesheet" href="/static/costs.css">
+    <link rel="stylesheet" href="{{ root_path }}/static/style.css">
+    <link rel="stylesheet" href="{{ root_path }}/static/costs.css">
 </head>
 <body>
     <div class="container">
@@ -13,9 +13,9 @@
             <h1>Family Costs Bot</h1>
             {% if authenticated %}
             <nav class="nav-links">
-                <a href="/costs">Расходы</a>
-                <a href="/costs/add">Добавить</a>
-                <a href="/costs/logout" class="logout-link">Выход</a>
+                <a href="{{ root_path }}/costs">Расходы</a>
+                <a href="{{ root_path }}/costs/add">Добавить</a>
+                <a href="{{ root_path }}/costs/logout" class="logout-link">Выход</a>
             </nav>
             {% endif %}
         </header>

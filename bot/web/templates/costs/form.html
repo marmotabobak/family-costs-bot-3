@@ -12,7 +12,7 @@
     </div>
     {% endif %}
 
-    <form action="{% if cost %}/costs/{{ cost.id }}/edit{% else %}/costs/add{% endif %}" method="post">
+    <form action="{% if cost %}{{ root_path }}/costs/{{ cost.id }}/edit{% else %}{{ root_path }}/costs/add{% endif %}" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
         <div class="form-group">
@@ -38,7 +38,7 @@
         </div>
 
         <div class="form-actions">
-            <a href="/costs" class="btn btn-secondary">Отмена</a>
+            <a href="{{ root_path }}/costs" class="btn btn-secondary">Отмена</a>
             <button type="submit" class="btn btn-primary">{% if cost %}Сохранить{% else %}Добавить{% endif %}</button>
         </div>
     </form>
