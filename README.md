@@ -292,6 +292,10 @@ ALLOWED_USER_IDS=123456789,987654321
 # Опционально: пароль для Web UI управления расходами
 # Если не указано — доступ к /costs закрыт
 WEB_PASSWORD=my_secret_password
+
+# Опционально: префикс URL для web UI (nginx снимает перед проксированием в FastAPI)
+# В dev оставить пустым
+WEB_ROOT_PATH=
 ```
 
 ### 3. Запуск
@@ -320,6 +324,8 @@ GET http://localhost:8000/costs/login
 ```
 
 ### Web API Endpoints
+
+В dev-режиме (без `WEB_ROOT_PATH`) эндпоинты доступны по корню. В prod nginx проксирует `/bot/` → FastAPI, поэтому все URL доступны под префиксом `/bot` (например, `/bot/costs/login`).
 
 | Endpoint | Описание |
 |----------|----------|
@@ -490,6 +496,7 @@ ENV=prod
 ALLOWED_USER_IDS=123456789,987654321
 WEB_BASE_URL=https://your-domain.com
 WEB_PASSWORD=secure_web_password
+WEB_ROOT_PATH=/bot
 EOF
 
 # Запустить
@@ -508,6 +515,7 @@ docker-compose up -d --build
 | `ALLOWED_USER_IDS` | Список разрешённых user_id через запятую | ❌ Нет | `123456789,987654321` |
 | `WEB_BASE_URL` | Базовый URL web-сервера (для ссылок в боте) | ❌ Нет | `http://localhost:8000` |
 | `WEB_PASSWORD` | Пароль для входа в Web UI управления расходами | ❌ Нет | `my_secret_password` |
+| `WEB_ROOT_PATH` | Префикс URL для web UI (nginx снимает перед проксированием в FastAPI) | ❌ Нет | `/bot` |
 
 ### Переменная ENV
 
