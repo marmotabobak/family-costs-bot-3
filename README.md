@@ -488,6 +488,7 @@ POSTGRES_PORT=5432
 DATABASE_URL=postgresql+asyncpg://prod_user:secure_password@postgres:5432/family_costs
 ENV=prod
 ALLOWED_USER_IDS=123456789,987654321
+WEB_BASE_URL=https://your-domain.com
 WEB_PASSWORD=secure_web_password
 EOF
 
@@ -505,6 +506,7 @@ docker-compose up -d --build
 | `DATABASE_URL` | URL подключения к PostgreSQL | ✅ Да | `postgresql+asyncpg://user:pass@localhost:5432/db` |
 | `ENV` | Режим работы (`dev`/`test`/`prod`) | ❌ Нет | `dev` |
 | `ALLOWED_USER_IDS` | Список разрешённых user_id через запятую | ❌ Нет | `123456789,987654321` |
+| `WEB_BASE_URL` | Базовый URL web-сервера (для ссылок в боте) | ❌ Нет | `http://localhost:8000` |
 | `WEB_PASSWORD` | Пароль для входа в Web UI управления расходами | ❌ Нет | `my_secret_password` |
 
 ### Переменная ENV
