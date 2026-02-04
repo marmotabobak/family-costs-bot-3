@@ -39,6 +39,7 @@ async def health_check():
 # Setup templates and static files
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+templates.env.globals["root_path"] = settings.web_root_path
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
@@ -106,7 +107,7 @@ async def handle_upload(
     # Store data in session
     session["data"] = data
 
-    return RedirectResponse(url=f"/import/{token}/select", status_code=303)
+    return RedirectResponse(url=f"{settings.web_root_path}/import/{token}/select", status_code=303)
 
 
 @app.get("/import/{token}/select", response_class=HTMLResponse)
@@ -117,7 +118,7 @@ async def select_page(request: Request, token: str):
         raise HTTPException(status_code=404, detail="Ссылка недействительна")
 
     if not session.get("data"):
-        return RedirectResponse(url=f"/import/{token}")
+        return RedirectResponse(url=f"{settings.web_root_path}/import/{token}")
 
     checks = session["data"]["checks"]
 
