@@ -285,17 +285,21 @@ async def edit_cost(
         "user_id": user_id,
         "created_at": created_at,
     }
-    users = await _get_users_for_form()
+
+    async with get_db_session() as session:
+        users = await get_all_users(session)
+        existing_message = await get_message_by_id(session, cost_id)
+    existing_cost = parse_message_to_cost(existing_message) if existing_message else None
 
     # Validate amount
     try:
         amount_decimal = Decimal(amount.replace(",", "."))
     except (InvalidOperation, ValueError):
-        return render_form_error(request, "Некорректная сумма", None, form_data, users)
+        return render_form_error(request, "Некорректная сумма", existing_cost, form_data, users)
 
     # Validate user_id
     if user_id < 1:
-        return render_form_error(request, "User ID должен быть больше 0", None, form_data, users)
+        return render_form_error(request, "User ID должен быть больше 0", existing_cost, form_data, users)
 
     # Parse datetime
     parsed_created_at = None
@@ -303,7 +307,7 @@ async def edit_cost(
         try:
             parsed_created_at = datetime.fromisoformat(created_at)
         except ValueError:
-            return render_form_error(request, "Некорректная дата", None, form_data, users)
+            return render_form_error(request, "Некорректная дата", existing_cost, form_data, users)
 
     text = f"{name} {amount_decimal}"
 
@@ -326,7 +330,7 @@ async def edit_cost(
             logger.exception("Error updating cost: %s", e)
             await session.rollback()
             return render_form_error(
-                request, "Ошибка сохранения в базу данных", None, form_data, users
+                request, "Ошибка сохранения в базу данных", existing_cost, form_data, users
             )
 
     set_flash_message(request, "Расход успешно обновлён", "success")

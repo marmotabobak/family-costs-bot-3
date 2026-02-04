@@ -178,18 +178,22 @@ async def edit_user(
 
     form_data = {"name": name, "telegram_id": telegram_id}
 
+    # Fetch existing user for error re-renders (keeps form action correct)
+    async with get_db_session() as session:
+        existing_user = await get_user_by_id(session, user_id)
+
     # Validate name
     if not name.strip():
-        return _render_form_error(request, "Имя не может быть пустым", None, form_data)
+        return _render_form_error(request, "Имя не может быть пустым", existing_user, form_data)
 
     # Validate telegram_id
     try:
         telegram_id_int = int(telegram_id)
     except ValueError:
-        return _render_form_error(request, "Telegram ID должен быть числом", None, form_data)
+        return _render_form_error(request, "Telegram ID должен быть числом", existing_user, form_data)
 
     if telegram_id_int < 1:
-        return _render_form_error(request, "Telegram ID должен быть больше 0", None, form_data)
+        return _render_form_error(request, "Telegram ID должен быть больше 0", existing_user, form_data)
 
     async with get_db_session() as session:
         try:
@@ -201,14 +205,14 @@ async def edit_user(
         except IntegrityError:
             await session.rollback()
             return _render_form_error(
-                request, "Пользователь с таким Telegram ID уже существует", None, form_data
+                request, "Пользователь с таким Telegram ID уже существует", existing_user, form_data
             )
         except HTTPException:
             raise
         except Exception as e:
             logger.exception("Error updating user: %s", e)
             await session.rollback()
-            return _render_form_error(request, "Ошибка сохранения в базу данных", None, form_data)
+            return _render_form_error(request, "Ошибка сохранения в базу данных", existing_user, form_data)
 
     set_flash_message(request, "Пользователь успешно обновлён", "success")
     return RedirectResponse(url=f"{settings.web_root_path}/users", status_code=303)

@@ -36,6 +36,12 @@ app.include_router(users_router)
 app.include_router(logs_router)
 
 
+@app.get("/")
+async def root_redirect():
+    """Redirect root to costs page (or login if not authenticated)."""
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=307)
+
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint for container orchestration."""
