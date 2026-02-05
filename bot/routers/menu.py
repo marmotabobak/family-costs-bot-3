@@ -111,12 +111,12 @@ def format_month_report(
 
     total = sum((amount for _, amount, _ in costs), Decimal(0))
     
-    lines = [header, "", f"<b>Всего:</b> {format_amount(total)}", ""]
+    lines = [header, "", f"<b>Всего:</b> {format_amount(total, sep='_')}", ""]
 
     # Сортируем по дате по возрастанию (costs уже отсортированы в репозитории)
     for name, amount, date in costs:
         date_str = date.strftime("%d")
-        lines.append(f"{date_str}: {name} {format_amount(amount)}")
+        lines.append(f"{date_str}: {name} {format_amount(amount, sep='_')}")
 
     return "\n".join(lines)
 

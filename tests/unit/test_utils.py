@@ -54,6 +54,12 @@ class TestFormatAmount:
         """Маленькое число с дробью."""
         assert format_amount(Decimal("0.01")) == "0.01"
 
+    def test_custom_separator_underscore(self):
+        """sep='_' используется в бот-сообщениях."""
+        assert format_amount(Decimal("1000"), sep="_") == "1_000"
+        assert format_amount(Decimal("1234.56"), sep="_") == "1_234.56"
+        assert format_amount(Decimal("100"), sep="_") == "100"
+
 
 class TestPluralize:
     """Тесты склонения существительных по числу."""
