@@ -773,7 +773,7 @@ class TestEdgeCasesApi:
                         "name": "Test",
                         "amount": "100",
                         "user_id": "1",
-                        "created_at": "2025-06-15T10:30",
+                        "created_at": "2025-06-15",
                         "csrf_token": csrf_token,
                     },
                     follow_redirects=False,

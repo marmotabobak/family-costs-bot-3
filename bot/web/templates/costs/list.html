@@ -1,5 +1,15 @@
 {% extends "costs/base.html" %}
 
+{% macro sort_header(field, label, order_by, order_dir, per_page) %}
+{% if order_by == field and order_dir == 'desc' %}
+<a href="{{ root_path }}/costs?page=1&per_page={{ per_page }}&order_by={{ field }}&order_dir=asc" class="sort-link sort-active">{{ label }} ↑</a>
+{%- elif order_by == field -%}
+<a href="{{ root_path }}/costs?page=1&per_page={{ per_page }}&order_by={{ field }}&order_dir=desc" class="sort-link sort-active">{{ label }} ↓</a>
+{%- else -%}
+<a href="{{ root_path }}/costs?page=1&per_page={{ per_page }}&order_by={{ field }}&order_dir=desc" class="sort-link">{{ label }}</a>
+{%- endif %}
+{% endmacro %}
+
 {% block title %}Список расходов{% endblock %}
 
 {% block content %}
@@ -9,27 +19,54 @@
         <a href="{{ root_path }}/costs/add" class="btn btn-primary">Добавить</a>
     </div>
 
+    <div class="controls-bar">
+        <div class="per-page-selector">
+            <label>На странице:</label>
+            <select onchange="window.location.href='{{ root_path }}/costs?page=1&per_page=' + this.value + '&order_by={{ order_by }}&order_dir={{ order_dir }}'">
+                {% for n in [20, 50, 100, 200] %}
+                <option value="{{ n }}" {% if costs.per_page == n %}selected{% endif %}>{{ n }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <span class="total-info">Всего: {{ costs.total }}</span>
+    </div>
+
     {% if costs.items %}
+    <div class="bulk-actions" id="bulkActions">
+        <span id="selectedCount">0 выбрано</span>
+        <form id="bulkDeleteForm" action="{{ root_path }}/costs/bulk-delete" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-danger btn-small">Удалить</button>
+        </form>
+        <form id="bulkDateForm" action="{{ root_path }}/costs/bulk-change-date" method="post" class="bulk-date-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="date" name="new_date">
+            <button type="submit" class="btn btn-secondary btn-small">Изменить дату</button>
+        </form>
+    </div>
+
     <div class="costs-table-wrapper">
         <table class="costs-table">
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Название</th>
-                    <th>Сумма</th>
-                    <th>Пользователь</th>
-                    <th>Дата</th>
+                    <th class="cb-col"><input type="checkbox" id="selectAll"></th>
+                    <th>{{ sort_header('id', 'ID', order_by, order_dir, costs.per_page) }}</th>
+                    <th>{{ sort_header('name', 'Название', order_by, order_dir, costs.per_page) }}</th>
+                    <th>{{ sort_header('amount', 'Сумма', order_by, order_dir, costs.per_page) }}</th>
+                    <th>{{ sort_header('user_id', 'Пользователь', order_by, order_dir, costs.per_page) }}</th>
+                    <th>{{ sort_header('created_at', 'Дата', order_by, order_dir, costs.per_page) }}</th>
                     <th>Действия</th>
                 </tr>
             </thead>
             <tbody>
                 {% for cost in costs.items %}
                 <tr>
+                    <td class="cb-col"><input type="checkbox" class="row-checkbox" value="{{ cost.id }}"></td>
                     <td>{{ cost.id }}</td>
                     <td>{{ cost.name }}</td>
-                    <td class="amount {% if cost.amount < 0 %}negative{% endif %}">{{ cost.amount }}</td>
+                    <td class="amount {% if cost.amount < 0 %}negative{% endif %}">{{ cost.amount|format_amount }}</td>
                     <td>{{ users_map.get(cost.user_id, cost.user_id) }}</td>
-                    <td>{{ cost.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td>{{ cost.created_at.strftime('%d.%m.%Y') }}</td>
                     <td class="actions">
                         <a href="{{ root_path }}/costs/{{ cost.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
                         <form action="{{ root_path }}/costs/{{ cost.id }}/delete" method="post" class="inline-form" onsubmit="return confirm('Удалить запись?')">
@@ -46,13 +83,13 @@
     {% if costs.total_pages > 1 %}
     <div class="pagination">
         {% if costs.page > 1 %}
-        <a href="{{ root_path }}/costs?page={{ costs.page - 1 }}" class="btn btn-secondary">&laquo; Назад</a>
+        <a href="{{ root_path }}/costs?page={{ costs.page - 1 }}&per_page={{ costs.per_page }}&order_by={{ order_by }}&order_dir={{ order_dir }}" class="btn btn-secondary">&laquo; Назад</a>
         {% endif %}
 
         <span class="page-info">Страница {{ costs.page }} из {{ costs.total_pages }} (всего: {{ costs.total }})</span>
 
         {% if costs.page < costs.total_pages %}
-        <a href="{{ root_path }}/costs?page={{ costs.page + 1 }}" class="btn btn-secondary">Вперёд &raquo;</a>
+        <a href="{{ root_path }}/costs?page={{ costs.page + 1 }}&per_page={{ costs.per_page }}&order_by={{ order_by }}&order_dir={{ order_dir }}" class="btn btn-secondary">Вперёд &raquo;</a>
         {% endif %}
     </div>
     {% endif %}
@@ -61,4 +98,72 @@
     <p class="empty-message">Расходов пока нет. <a href="{{ root_path }}/costs/add">Добавьте первый!</a></p>
     {% endif %}
 </div>
+
+{% if costs.items %}
+<script>
+(function() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.row-checkbox');
+    const bulkBar = document.getElementById('bulkActions');
+    const countLabel = document.getElementById('selectedCount');
+    const deleteForm = document.getElementById('bulkDeleteForm');
+    const dateForm = document.getElementById('bulkDateForm');
+
+    bulkBar.style.display = 'none';
+
+    function updateBulkBar() {
+        const checked = [...checkboxes].filter(cb => cb.checked);
+        if (checked.length > 0) {
+            bulkBar.style.display = 'flex';
+            countLabel.textContent = checked.length + ' выбрано';
+        } else {
+            bulkBar.style.display = 'none';
+        }
+        selectAll.checked = checked.length === checkboxes.length && checkboxes.length > 0;
+        selectAll.indeterminate = checked.length > 0 && checked.length < checkboxes.length;
+    }
+
+    selectAll.addEventListener('change', function() {
+        checkboxes.forEach(cb => cb.checked = this.checked);
+        updateBulkBar();
+    });
+    checkboxes.forEach(cb => cb.addEventListener('change', updateBulkBar));
+
+    function addSelectedIds(form) {
+        form.querySelectorAll('input[name="ids"]').forEach(i => i.remove());
+        [...checkboxes].filter(cb => cb.checked).forEach(cb => {
+            const input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = 'ids';
+            input.value = cb.value;
+            form.appendChild(input);
+        });
+    }
+
+    deleteForm.addEventListener('submit', function(e) {
+        const count = [...checkboxes].filter(cb => cb.checked).length;
+        if (!confirm('Удалить ' + count + ' записей? Это нельзя отменить.')) {
+            e.preventDefault();
+            return;
+        }
+        addSelectedIds(this);
+    });
+
+    dateForm.addEventListener('submit', function(e) {
+        const dateInput = this.querySelector('input[name="new_date"]');
+        if (!dateInput.value) {
+            e.preventDefault();
+            alert('Выберите дату');
+            return;
+        }
+        const count = [...checkboxes].filter(cb => cb.checked).length;
+        if (!confirm('Изменить дату для ' + count + ' записей на ' + dateInput.value + '?')) {
+            e.preventDefault();
+            return;
+        }
+        addSelectedIds(this);
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

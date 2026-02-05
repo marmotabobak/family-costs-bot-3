@@ -70,6 +70,83 @@
     border: 1px solid #bee5eb;
 }
 
+/* Controls bar */
+.controls-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.per-page-selector {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    color: #555;
+}
+
+.per-page-selector select {
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+.total-info {
+    font-size: 0.9rem;
+    color: #666;
+}
+
+/* Bulk actions bar */
+.bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+#selectedCount {
+    font-weight: 600;
+    color: #856404;
+    min-width: 80px;
+}
+
+.bulk-date-form {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.bulk-date-form input[type="date"] {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+
+/* Sortable column headers */
+.costs-table th a.sort-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.costs-table th a.sort-link:hover {
+    color: #3498db;
+}
+
+.costs-table th a.sort-active {
+    color: #3498db;
+    font-weight: 600;
+}
+
 /* Table */
 .costs-table-wrapper {
     overflow-x: auto;
@@ -107,6 +184,17 @@
 
 .costs-table .amount.negative {
     color: #e74c3c;
+}
+
+/* Checkbox column */
+.costs-table .cb-col {
+    width: 40px;
+    text-align: center;
+}
+
+.costs-table .cb-col input[type="checkbox"] {
+    accent-color: #3498db;
+    cursor: pointer;
 }
 
 /* Buttons */

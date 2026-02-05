@@ -145,8 +145,8 @@ class TestFormatMonthReport:
         report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
 
         assert "<b>Январь 2024</b>" in report
-        assert "<b>Всего:</b> 162.84" in report  # total
-        assert "15: Продукты 100.00" in report
+        assert "<b>Всего:</b> 162.84" in report  # total (has fractional)
+        assert "15: Продукты 100" in report  # 100.00 → no .00
         assert "20: Транспорт 50.50" in report
         assert "2: \\-.!#_@:`<>/ 12.34" in report
 

@@ -13,13 +13,17 @@ from fastapi.templating import Jinja2Templates
 from bot.config import settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.messages import (
+    bulk_delete_messages,
+    bulk_update_messages_date,
     delete_message_by_id,
     get_all_costs_paginated,
+    get_all_messages,
     get_message_by_id,
     save_message,
     update_message,
 )
 from bot.db.repositories.users import get_all_users
+from bot.utils import format_amount, pluralize
 from bot.web.auth import (
     get_csrf_token,
     get_flash_message,
@@ -36,6 +40,10 @@ router = APIRouter(prefix="/costs", tags=["costs"])
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["root_path"] = settings.web_root_path
+templates.env.filters["format_amount"] = format_amount
+
+# Fields sortable at the DB level; name/amount require Python-side sorting
+_DB_SORT_FIELDS = {"id", "created_at", "user_id"}
 
 
 @dataclass
@@ -115,29 +123,69 @@ def render_form_error(
 
 
 @router.get("", response_class=HTMLResponse)
-async def costs_list(request: Request, page: int = 1):
+async def costs_list(
+    request: Request,
+    page: int = 1,
+    per_page: int = 100,
+    order_by: str = "created_at",
+    order_dir: str = "desc",
+):
     """Show paginated list of all costs."""
     if not is_authenticated(request):
         return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
     if page < 1:
         page = 1
+    if per_page not in (20, 50, 100, 200):
+        per_page = 100
+    if order_dir not in ("asc", "desc"):
+        order_dir = "desc"
+    if order_by not in ("id", "created_at", "user_id", "name", "amount"):
+        order_by = "created_at"
 
     flash_message, flash_type = get_flash_message(request)
 
     async with get_db_session() as session:
-        paginated = await get_all_costs_paginated(session, page=page, per_page=20)
         users = await get_all_users(session)
 
-        items = [parse_message_to_cost(msg) for msg in paginated.items]
+        if order_by in _DB_SORT_FIELDS:
+            paginated = await get_all_costs_paginated(
+                session,
+                page=page,
+                per_page=per_page,
+                order_by=order_by,
+                order_dir=order_dir,
+            )
+            items = [parse_message_to_cost(msg) for msg in paginated.items]
+            costs = CostsResponse(
+                items=items,
+                total=paginated.total,
+                page=paginated.page,
+                per_page=paginated.per_page,
+                total_pages=paginated.total_pages,
+            )
+        else:
+            # name / amount: fetch all, sort in Python, paginate in Python
+            all_messages = await get_all_messages(session)
+            all_items = [parse_message_to_cost(msg) for msg in all_messages]
+            reverse = order_dir == "desc"
+            if order_by == "name":
+                all_items.sort(key=lambda c: c.name.lower(), reverse=reverse)
+            else:  # amount
+                all_items.sort(key=lambda c: c.amount, reverse=reverse)
 
-        costs = CostsResponse(
-            items=items,
-            total=paginated.total,
-            page=paginated.page,
-            per_page=paginated.per_page,
-            total_pages=paginated.total_pages,
-        )
+            total = len(all_items)
+            total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+            page = max(1, min(page, total_pages))
+            start = (page - 1) * per_page
+            items = all_items[start : start + per_page]
+            costs = CostsResponse(
+                items=items,
+                total=total,
+                page=page,
+                per_page=per_page,
+                total_pages=total_pages,
+            )
 
     users_map = {u.telegram_id: u.name for u in users}
 
@@ -151,6 +199,8 @@ async def costs_list(request: Request, page: int = 1):
             "flash_message": flash_message,
             "flash_type": flash_type,
             "csrf_token": get_csrf_token(request),
+            "order_by": order_by,
+            "order_dir": order_dir,
         },
     )
 
@@ -370,4 +420,83 @@ async def delete_cost(
             return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
     set_flash_message(request, "Расход успешно удалён", "success")
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+
+@router.post("/bulk-delete")
+async def bulk_delete(
+    request: Request,
+    ids: list[int] = Form(...),
+    csrf_token: str = Form(""),
+):
+    """Handle bulk delete of selected costs."""
+    if not is_authenticated(request):
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    if not ids:
+        set_flash_message(request, "Не выбрано ничего", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    async with get_db_session() as session:
+        try:
+            count = await bulk_delete_messages(session, ids)
+            await session.commit()
+            logger.info("Bulk deleted %d costs via web", count)
+        except Exception as e:
+            logger.exception("Error in bulk delete: %s", e)
+            await session.rollback()
+            set_flash_message(request, "Ошибка удаления", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    set_flash_message(
+        request,
+        f"Удалено {count} {pluralize(count, 'расход', 'расхода', 'расходов')}",
+        "success",
+    )
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+
+@router.post("/bulk-change-date")
+async def bulk_change_date(
+    request: Request,
+    ids: list[int] = Form(...),
+    new_date: str = Form(...),
+    csrf_token: str = Form(""),
+):
+    """Handle bulk date change for selected costs."""
+    if not is_authenticated(request):
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    if not ids:
+        set_flash_message(request, "Не выбрано ничего", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    try:
+        parsed_date = datetime.fromisoformat(new_date)
+    except ValueError:
+        set_flash_message(request, "Некорректная дата", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    async with get_db_session() as session:
+        try:
+            count = await bulk_update_messages_date(session, ids, parsed_date)
+            await session.commit()
+            logger.info("Bulk updated date for %d costs via web", count)
+        except Exception as e:
+            logger.exception("Error in bulk change date: %s", e)
+            await session.rollback()
+            set_flash_message(request, "Ошибка обновления даты", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    set_flash_message(
+        request,
+        f"Дата обновлена для {count} {pluralize(count, 'расхода', 'расходов', 'расходов')}",
+        "success",
+    )
     return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
