@@ -1,6 +1,6 @@
 """Unit tests for users repository."""
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -122,7 +122,7 @@ class TestCreateUser:
     @pytest.mark.asyncio
     async def test_creates_and_returns_user(self, mock_session):
         """Creates user, flushes, refreshes, returns it."""
-        result = await create_user(mock_session, telegram_id=123, name="Иван")
+        await create_user(mock_session, telegram_id=123, name="Иван")
 
         mock_session.add.assert_called_once()
         added_user = mock_session.add.call_args[0][0]
