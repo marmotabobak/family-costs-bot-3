@@ -213,6 +213,7 @@ class TestFullImportFlow:
 
         # Session data should be cleared
         session = import_sessions.get(valid_token)
+        assert session is not None
         assert session["data"] is None
 
     def test_save_no_items_shows_error(self, client, valid_token, sample_vkusvill_json):
@@ -298,6 +299,7 @@ class TestSessionIsolation:
 
         # Token2 should not have data
         session2 = import_sessions.get(token2)
+        assert session2 is not None
         assert session2["data"] is None
 
         # Cleanup

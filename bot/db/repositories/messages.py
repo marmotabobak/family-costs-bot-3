@@ -209,10 +209,26 @@ class PaginatedCosts:
     total_pages: int
 
 
+async def get_all_messages(session: AsyncSession) -> list[Message]:
+    """Возвращает все сообщения, отсортированные по дате (убывание)."""
+    result = await session.execute(select(Message).order_by(Message.created_at.desc()))
+    return list(result.scalars().all())
+
+
+# Колонки, которые можно сортировать на уровне БД
+_DB_SORT_COLUMNS: dict[str, Any] = {
+    "id": Message.id,
+    "created_at": Message.created_at,
+    "user_id": Message.user_id,
+}
+
+
 async def get_all_costs_paginated(
     session: AsyncSession,
     page: int = 1,
-    per_page: int = 20,
+    per_page: int = 100,
+    order_by: str = "created_at",
+    order_dir: str = "desc",
 ) -> PaginatedCosts:
     """Возвращает все расходы с пагинацией (для веб-интерфейса)."""
     from sqlalchemy import func
@@ -226,10 +242,14 @@ async def get_all_costs_paginated(
     page = max(1, min(page, total_pages))
     offset = (page - 1) * per_page
 
+    # Определяем колонку и направление сортировки
+    order_column = _DB_SORT_COLUMNS.get(order_by, Message.created_at)
+    order = order_column.desc() if order_dir == "desc" else order_column.asc()
+
     # Получаем записи
     result = await session.execute(
         select(Message)
-        .order_by(Message.created_at.desc())
+        .order_by(order)
         .offset(offset)
         .limit(per_page)
     )
@@ -297,3 +317,39 @@ async def delete_message_by_id(session: AsyncSession, message_id: int) -> bool:
         delete(Message).where(Message.id == message_id)
     )
     return (result.rowcount or 0) > 0  # type: ignore[attr-defined]
+
+
+async def bulk_delete_messages(session: AsyncSession, message_ids: list[int]) -> int:
+    """Удаляет сообщения по списку ID (без фильтра по user_id — для администратора).
+
+    Returns:
+        Количество удалённых записей
+    """
+    from sqlalchemy import delete
+    from sqlalchemy.engine import Result
+
+    result: Result[Any] = await session.execute(
+        delete(Message).where(Message.id.in_(message_ids))
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+async def bulk_update_messages_date(
+    session: AsyncSession,
+    message_ids: list[int],
+    new_date: datetime,
+) -> int:
+    """Обновляет created_at для нескольких сообщений.
+
+    Returns:
+        Количество обновлённых записей
+    """
+    from sqlalchemy import update
+    from sqlalchemy.engine import Result
+
+    result: Result[Any] = await session.execute(
+        update(Message)
+        .where(Message.id.in_(message_ids))
+        .values(created_at=new_date)
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]

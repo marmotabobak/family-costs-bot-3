@@ -16,6 +16,7 @@ from bot.routers.messages import CALLBACK_CONFIRM, CALLBACK_UNDO, handle_confirm
 # Минимальные моки aiogram
 # ======================================================
 
+
 class MockUser:
     def __init__(self, user_id: int):
         self.id = user_id
@@ -77,8 +78,8 @@ def create_mock_callback(user_id: int, data: str):
 # handle_message — базовые сценарии
 # ======================================================
 
-class TestHandleMessageE2E:
 
+class TestHandleMessageE2E:
     @pytest.mark.asyncio
     async def test_single_cost_saved(self):
         msg = MockMessage("Продукты 100", user_id=101)
@@ -87,11 +88,7 @@ class TestHandleMessageE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            messages = (
-                await session.execute(
-                    select(Message).where(Message.user_id == 101)
-                )
-            ).scalars().all()
+            messages = (await session.execute(select(Message).where(Message.user_id == 101))).scalars().all()
 
             assert len(messages) == 1
             assert messages[0].text == "Продукты 100"
@@ -108,12 +105,10 @@ class TestHandleMessageE2E:
 
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == 102)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == 102).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert [m.text for m in messages] == [
                 "Продукты 100",
@@ -131,11 +126,7 @@ class TestHandleMessageE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            messages = (
-                await session.execute(
-                    select(Message).where(Message.user_id == 103)
-                )
-            ).scalars().all()
+            messages = (await session.execute(select(Message).where(Message.user_id == 103))).scalars().all()
 
             assert messages == []
 
@@ -159,11 +150,7 @@ class TestHandleMessageE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == 105)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == 105))).scalar_one()
 
             assert message.text == "корректировка -500.50"
 
@@ -172,8 +159,8 @@ class TestHandleMessageE2E:
 # Undo — отмена записи
 # ======================================================
 
-class TestUndoE2E:
 
+class TestUndoE2E:
     @pytest.mark.asyncio
     async def test_undo_deletes_records(self):
         user_id = 201
@@ -189,11 +176,7 @@ class TestUndoE2E:
         await handle_undo(callback, state)
 
         async with get_session() as session:
-            messages = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalars().all()
+            messages = (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
 
             assert messages == []
 
@@ -216,11 +199,7 @@ class TestUndoE2E:
 
         # 🔒 контрольная точка ДО undo — запись пользователя 2 существует
         async with get_session() as session:
-            msgs2_before = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user2)
-                )
-            ).scalars().all()
+            msgs2_before = (await session.execute(select(Message).where(Message.user_id == user2))).scalars().all()
 
             assert len(msgs2_before) == 1, "Запись пользователя 2 не сохранилась до undo"
 
@@ -237,21 +216,13 @@ class TestUndoE2E:
 
         # 🔒 контрольная точка ПОСЛЕ undo — запись пользователя 2 осталась
         async with get_session() as session:
-            msgs2_after = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user2)
-                )
-            ).scalars().all()
+            msgs2_after = (await session.execute(select(Message).where(Message.user_id == user2))).scalars().all()
 
             assert len(msgs2_after) == 1, "Запись пользователя 2 была удалена (нарушение безопасности)"
 
         # Проверяем что запись пользователя 1 тоже осталась (не была удалена пользователем 2)
         async with get_session() as session:
-            msgs1_after = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user1)
-                )
-            ).scalars().all()
+            msgs1_after = (await session.execute(select(Message).where(Message.user_id == user1))).scalars().all()
 
             assert len(msgs1_after) == 1, "Запись пользователя 1 была удалена"
 
@@ -260,8 +231,8 @@ class TestUndoE2E:
 # Past mode — ключевой сценарий
 # ======================================================
 
-class TestPastModeE2E:
 
+class TestPastModeE2E:
     @pytest.mark.asyncio
     async def test_past_mode_basic_flow(self):
         from bot.routers.menu import handle_enter_past_month, handle_disable_past
@@ -283,12 +254,10 @@ class TestPastModeE2E:
 
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 2
 
@@ -303,6 +272,7 @@ class TestPastModeE2E:
 # ======================================================
 # Comprehensive Past Mode E2E Scenarios (E2E-PM-1 through E2E-PM-12)
 # ======================================================
+
 
 class TestPastModeComplexE2E:
     """Comprehensive E2E tests for past mode complex scenarios."""
@@ -357,12 +327,10 @@ class TestPastModeComplexE2E:
         # Verify all expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 6
 
@@ -432,12 +400,10 @@ class TestPastModeComplexE2E:
         # Verify all expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 3
 
@@ -492,20 +458,18 @@ class TestPastModeComplexE2E:
         # Verify expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 3  # Only valid lines saved
 
             # All should have past date (March 2024)
-            for msg in messages:
-                assert msg.created_at.year == 2024
-                assert msg.created_at.month == 3
-                assert msg.created_at.day == 1
+            for db_msg in messages:
+                assert db_msg.created_at.year == 2024
+                assert db_msg.created_at.month == 3
+                assert db_msg.created_at.day == 1
 
             assert messages[0].text == "Продукты 100"
             assert messages[1].text == "Вода 50"
@@ -543,12 +507,10 @@ class TestPastModeComplexE2E:
         # Verify expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 2  # One was undone
 
@@ -607,12 +569,10 @@ class TestPastModeComplexE2E:
         # Verify all expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 6
 
@@ -671,12 +631,10 @@ class TestPastModeComplexE2E:
         # Verify all expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 6
 
@@ -736,12 +694,10 @@ class TestPastModeComplexE2E:
         # Verify User A's expenses
         async with get_session() as session:
             messages_a = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_a)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_a).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages_a) == 2
             # Both should have March 2024 date
@@ -753,12 +709,10 @@ class TestPastModeComplexE2E:
         # Verify User B's expenses
         async with get_session() as session:
             messages_b = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_b)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_b).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages_b) == 2
 
@@ -801,12 +755,10 @@ class TestPastModeComplexE2E:
         # Verify expense
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 1  # First was undone
             assert messages[0].text == "Вода 50"
@@ -883,12 +835,10 @@ class TestPastModeComplexE2E:
         # Verify expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 3
 
@@ -956,12 +906,10 @@ class TestPastModeComplexE2E:
         # Verify all expenses
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 5
 
@@ -1022,12 +970,10 @@ class TestPastModeComplexE2E:
         # Verify expenses were saved with past date
         async with get_session() as session:
             messages_before_undo = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages_before_undo) == 2
             for msg in messages_before_undo:
@@ -1042,11 +988,8 @@ class TestPastModeComplexE2E:
         # Verify expenses deleted
         async with get_session() as session:
             messages_after_undo = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
+            )
 
             assert len(messages_after_undo) == 0
 
@@ -1056,12 +999,7 @@ class TestPastModeComplexE2E:
 
         # Verify new expense has past date
         async with get_session() as session:
-            messages_final = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                )
-            ).scalars().all()
+            messages_final = (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
 
             assert len(messages_final) == 1
             assert messages_final[0].text == "Хлеб 30"
@@ -1073,6 +1011,7 @@ class TestPastModeComplexE2E:
 # ======================================================
 # Edge Cases E2E Tests
 # ======================================================
+
 
 class TestEdgeCasesE2E:
     """E2E тесты для граничных случаев."""
@@ -1087,11 +1026,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert "корректировка" in message.text
             assert "-500.50" in message.text
@@ -1106,11 +1041,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert "бесплатно" in message.text
             assert "0" in message.text
@@ -1125,11 +1056,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert "🍎" in message.text
 
@@ -1143,11 +1070,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert "#123" in message.text
             assert "@test" in message.text
@@ -1162,11 +1085,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert "10000000.99" in message.text
 
@@ -1189,11 +1108,7 @@ class TestEdgeCasesE2E:
 
         # Проверяем что после первого undo запись удалена
         async with get_session() as session:
-            messages = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalars().all()
+            messages = (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
 
             assert len(messages) == 0
 
@@ -1213,11 +1128,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert message.created_at.year == 2024
             assert message.created_at.month == 2
@@ -1241,11 +1152,7 @@ class TestEdgeCasesE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            message = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalar_one()
+            message = (await session.execute(select(Message).where(Message.user_id == user_id))).scalar_one()
 
             assert message.created_at.year == prev_year
             assert message.created_at.month == 1
@@ -1266,12 +1173,10 @@ class TestEdgeCasesE2E:
 
         async with get_session() as session:
             messages = (
-                await session.execute(
-                    select(Message)
-                    .where(Message.user_id == user_id)
-                    .order_by(Message.id)
-                )
-            ).scalars().all()
+                (await session.execute(select(Message).where(Message.user_id == user_id).order_by(Message.id)))
+                .scalars()
+                .all()
+            )
 
             assert len(messages) == 2
             assert "Расход1" in messages[0].text
@@ -1281,6 +1186,7 @@ class TestEdgeCasesE2E:
 # ======================================================
 # Error Scenarios E2E Tests
 # ======================================================
+
 
 class TestErrorScenariosE2E:
     """E2E тесты для сценариев ошибок."""
@@ -1295,11 +1201,7 @@ class TestErrorScenariosE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            messages = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalars().all()
+            messages = (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
 
             assert len(messages) == 0
 
@@ -1329,11 +1231,7 @@ class TestErrorScenariosE2E:
         await handle_message(msg, state)
 
         async with get_session() as session:
-            messages = (
-                await session.execute(
-                    select(Message).where(Message.user_id == user_id)
-                )
-            ).scalars().all()
+            messages = (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
 
             assert len(messages) == 0
 

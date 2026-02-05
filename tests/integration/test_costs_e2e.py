@@ -93,8 +93,10 @@ class TestAuthenticationFlow:
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("bot.web.costs.get_all_costs_paginated", return_value=mock_paginated), \
-                 patch("bot.web.costs.get_all_users", new=AsyncMock(return_value=[])):
+            with (
+                patch("bot.web.costs.get_all_costs_paginated", return_value=mock_paginated),
+                patch("bot.web.costs.get_all_users", new=AsyncMock(return_value=[])),
+            ):
                 response = client.get("/costs")
                 assert response.status_code == 200
                 assert "Расходы" in response.text
@@ -210,7 +212,7 @@ class TestRepositoryFunctionsE2E:
         async with get_session() as session:
             message = await save_message(session, user_id=333, text="Get by ID 100")
             await session.commit()
-            message_id = message.id
+            message_id = int(message.id)
 
         # Test retrieval
         async with get_session() as session:
@@ -234,7 +236,7 @@ class TestRepositoryFunctionsE2E:
         async with get_session() as session:
             message = await save_message(session, user_id=222, text="Original 100")
             await session.commit()
-            message_id = message.id
+            message_id = int(message.id)
 
         # Test update
         async with get_session() as session:
@@ -268,7 +270,7 @@ class TestRepositoryFunctionsE2E:
         async with get_session() as session:
             message = await save_message(session, user_id=221, text="DateTime test 100")
             await session.commit()
-            message_id = message.id
+            message_id = int(message.id)
 
         # Test update with datetime
         new_datetime = datetime(2025, 6, 15, 10, 30)
@@ -294,19 +296,19 @@ class TestRepositoryFunctionsE2E:
         async with get_session() as session:
             message = await save_message(session, user_id=111, text="To delete 100")
             await session.commit()
-            message_id = message.id
+            message_id = int(message.id)
 
         # Test delete
         async with get_session() as session:
-            result = await delete_message_by_id(session, message_id)
+            deleted = await delete_message_by_id(session, message_id)
             await session.commit()
 
-            assert result is True
+            assert deleted is True
 
         # Verify deleted
         async with get_session() as session:
-            result = await get_message_by_id(session, message_id)
-            assert result is None
+            gone = await get_message_by_id(session, message_id)
+            assert gone is None
 
     @pytest.mark.asyncio
     async def test_delete_message_by_id_not_found(self):

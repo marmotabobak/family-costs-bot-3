@@ -15,6 +15,7 @@ from bot.db.repositories.messages import (
     get_user_costs_by_month,
 )
 from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
+from bot.utils import format_amount
 from aiogram.enums import ParseMode
 
 logger = logging.getLogger(__name__)
@@ -108,14 +109,14 @@ def format_month_report(
             return f"{header}\n\n📭 Нет расходов за этот период."
         return f"{header}\n\n📭 У пользователя {user_name} нет расходов за этот период."
 
-    total = sum(amount for _, amount, _ in costs)
+    total = sum((amount for _, amount, _ in costs), Decimal(0))
     
-    lines = [header, "", f"<b>Всего:</b> {total:.2f}", ""]
-    
+    lines = [header, "", f"<b>Всего:</b> {format_amount(total)}", ""]
+
     # Сортируем по дате по возрастанию (costs уже отсортированы в репозитории)
     for name, amount, date in costs:
         date_str = date.strftime("%d")
-        lines.append(f"{date_str}: {name} {amount:.2f}")
+        lines.append(f"{date_str}: {name} {format_amount(amount)}")
 
     return "\n".join(lines)
 

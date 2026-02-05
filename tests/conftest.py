@@ -1,4 +1,10 @@
-"""Root conftest - safety checks and test environment setup."""
+"""Root conftest - safety checks and test environment setup.
+
+Must live at the project root (next to pyproject.toml) so that
+pytest_configure runs *before* any tests/…/conftest.py is imported.
+Otherwise subdirectory conftest imports can trigger bot.config.Settings()
+while os.environ["ENV"] is still unset, locking in ENV=dev from .env.
+"""
 
 import os
 

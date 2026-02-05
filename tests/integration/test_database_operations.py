@@ -10,6 +10,7 @@ from bot.db.models import Message
 from bot.db.repositories.messages import save_message, delete_messages_by_ids
 from bot.services.message_parser import parse_message
 
+
 class TestFullMessageFlow:
     """Тесты полного E2E flow."""
 
@@ -285,7 +286,7 @@ class TestDeleteMessages:
         async with get_session() as session:
             deleted = await delete_messages_by_ids(
                 session,
-                [m1.id, m2.id],
+                [int(m1.id), int(m2.id)],
                 user_id,
             )
             await session.commit()

@@ -61,8 +61,9 @@ class TestUsersListRoute:
         token, _ = _setup_auth()
         users = [_make_user(1, 111, "Алёна"), _make_user(2, 222, "Иван")]
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_all_users", new=AsyncMock(return_value=users)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_all_users", new=AsyncMock(return_value=users)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.get("/users", cookies={"costs_session": token})
@@ -77,8 +78,9 @@ class TestUsersListRoute:
         """Shows empty message when no users exist."""
         token, _ = _setup_auth()
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_all_users", new=AsyncMock(return_value=[])
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_all_users", new=AsyncMock(return_value=[])),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.get("/users", cookies={"costs_session": token})
@@ -108,8 +110,9 @@ class TestAddUserRoute:
         """Successful user creation redirects to /users."""
         token, csrf = _setup_auth()
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.create_user", new=AsyncMock()
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.create_user", new=AsyncMock()),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
@@ -179,10 +182,11 @@ class TestAddUserRoute:
         token, csrf = _setup_auth()
 
         async def raise_integrity(session, **kwargs):
-            raise IntegrityError("duplicate", None, None)
+            raise IntegrityError("duplicate", None, Exception("duplicate"))
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.create_user", side_effect=raise_integrity
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.create_user", side_effect=raise_integrity),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
@@ -205,8 +209,9 @@ class TestEditUserRoute:
         token, _ = _setup_auth()
         user = _make_user(1, 123, "Иван")
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.get("/users/1/edit", cookies={"costs_session": token})
@@ -221,8 +226,9 @@ class TestEditUserRoute:
         """Edit form returns 404 for unknown user."""
         token, _ = _setup_auth()
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=None)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=None)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.get("/users/999/edit", cookies={"costs_session": token})
@@ -236,9 +242,11 @@ class TestEditUserRoute:
         token, csrf = _setup_auth()
         user = _make_user(1, 123, "Иван")
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
-        ), patch("bot.web.users.update_user", new=AsyncMock(return_value=user)):
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user", new=AsyncMock(return_value=user)),
+        ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
                     "/users/1/edit",
@@ -251,15 +259,15 @@ class TestEditUserRoute:
         assert response.status_code == 303
         assert "/users" in response.headers["location"]
 
-
     @pytest.mark.asyncio
     async def test_edit_user_empty_name_shows_error(self):
         """Edit with empty name re-renders form with error."""
         token, csrf = _setup_auth()
         user = _make_user(1, 123, "Иван")
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
@@ -278,8 +286,9 @@ class TestEditUserRoute:
         token, csrf = _setup_auth()
         user = _make_user(1, 123, "Иван")
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
@@ -301,11 +310,13 @@ class TestEditUserRoute:
         user = _make_user(1, 123, "Иван")
 
         async def raise_integrity(*args, **kwargs):
-            raise IntegrityError("duplicate", None, None)
+            raise IntegrityError("duplicate", None, Exception("duplicate"))
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
-        ), patch("bot.web.users.update_user", side_effect=raise_integrity):
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user", side_effect=raise_integrity),
+        ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
                     "/users/1/edit",
@@ -326,8 +337,9 @@ class TestDeleteUserRoute:
         """Successful delete redirects to /users."""
         token, csrf = _setup_auth()
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.delete_user", new=AsyncMock(return_value=True)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.delete_user", new=AsyncMock(return_value=True)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
@@ -346,8 +358,9 @@ class TestDeleteUserRoute:
         """Returns 404 when user doesn't exist."""
         token, csrf = _setup_auth()
 
-        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
-            "bot.web.users.delete_user", new=AsyncMock(return_value=False)
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.delete_user", new=AsyncMock(return_value=False)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(

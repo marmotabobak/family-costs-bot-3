@@ -60,7 +60,7 @@ class FakeDB:
     async def create_user(self, session, telegram_id, name):
         for u in self.users.values():
             if u.telegram_id == telegram_id:
-                raise IntegrityError("duplicate", None, None)
+                raise IntegrityError("duplicate", None, Exception("duplicate"))
         uid = self._next_uid
         self._next_uid += 1
         self.users[uid] = self._make_user(uid, telegram_id, name)
@@ -90,7 +90,7 @@ class FakeDB:
         m.created_at = created_at or datetime.now()
         return m
 
-    async def get_all_costs_paginated(self, session, page=1, per_page=20):
+    async def get_all_costs_paginated(self, session, page=1, per_page=20, order_by="created_at", order_dir="desc"):
         items = list(self.messages.values())
         r = MagicMock()
         r.items = items
@@ -124,6 +124,25 @@ class FakeDB:
             del self.messages[msg_id]
             return True
         return False
+
+    async def get_all_messages(self, session):
+        return list(self.messages.values())
+
+    async def bulk_delete_messages(self, session, message_ids):
+        count = 0
+        for mid in message_ids:
+            if mid in self.messages:
+                del self.messages[mid]
+                count += 1
+        return count
+
+    async def bulk_update_messages_date(self, session, message_ids, new_date):
+        count = 0
+        for mid in message_ids:
+            if mid in self.messages:
+                self.messages[mid].created_at = new_date
+                count += 1
+        return count
 
 
 SAMPLE_CHECKS = {
@@ -189,10 +208,13 @@ def costs_patches(db):
     with (
         patch("bot.web.costs.get_db_session", side_effect=_fake_session),
         patch("bot.web.costs.get_all_costs_paginated", new=AsyncMock(side_effect=db.get_all_costs_paginated)),
+        patch("bot.web.costs.get_all_messages", new=AsyncMock(side_effect=db.get_all_messages)),
         patch("bot.web.costs.get_message_by_id", new=AsyncMock(side_effect=db.get_message_by_id)),
         patch("bot.web.costs.save_message", new=AsyncMock(side_effect=db.save_message)),
         patch("bot.web.costs.update_message", new=AsyncMock(side_effect=db.update_message)),
         patch("bot.web.costs.delete_message_by_id", new=AsyncMock(side_effect=db.delete_message_by_id)),
+        patch("bot.web.costs.bulk_delete_messages", new=AsyncMock(side_effect=db.bulk_delete_messages)),
+        patch("bot.web.costs.bulk_update_messages_date", new=AsyncMock(side_effect=db.bulk_update_messages_date)),
         patch("bot.web.costs.get_all_users", new=AsyncMock(side_effect=db.get_all_users)),
     ):
         yield
@@ -562,6 +584,66 @@ class TestCostsCRUDJourney:
             csrf = await _login(c)
             r = await c.post("/costs/999/delete", data={"csrf_token": csrf})
         assert r.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_removes_selected(self, costs_patches, db):
+        """Select two costs and bulk-delete; only the unselected one remains."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.save_message(None, user_id=1, text="Первый 10")
+            await db.save_message(None, user_id=1, text="Второй 20")
+            await db.save_message(None, user_id=1, text="Третий 30")
+
+            r = await c.post(
+                "/costs/bulk-delete",
+                data={"ids": ["1", "2"], "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            r = await c.get("/costs")
+        assert "Первый" not in r.text
+        assert "Второй" not in r.text
+        assert "Третий" in r.text
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_csrf_required(self, costs_patches, db):
+        """Bulk delete without valid CSRF → 403."""
+        async with _client() as c:
+            await _login(c)
+            r = await c.post(
+                "/costs/bulk-delete",
+                data={"ids": ["1"], "csrf_token": "bad"},
+            )
+        assert r.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_bulk_change_date_updates_and_redirects(self, costs_patches, db):
+        """Bulk date change redirects on success."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.save_message(None, user_id=1, text="Тест 50")
+
+            r = await c.post(
+                "/costs/bulk-change-date",
+                data={"ids": ["1"], "new_date": "2025-06-15", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_bulk_change_date_invalid_date_redirects(self, costs_patches, db):
+        """Bulk date change with invalid date shows error flash."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.save_message(None, user_id=1, text="Тест 50")
+
+            r = await c.post(
+                "/costs/bulk-change-date",
+                data={"ids": ["1"], "new_date": "not-a-date", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
 
 
 # ===========================================================================

@@ -145,8 +145,8 @@ class TestFormatMonthReport:
         report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
 
         assert "<b>Январь 2024</b>" in report
-        assert "<b>Всего:</b> 162.84" in report  # total
-        assert "15: Продукты 100.00" in report
+        assert "<b>Всего:</b> 162.84" in report  # total (has fractional)
+        assert "15: Продукты 100" in report  # 100.00 → no .00
         assert "20: Транспорт 50.50" in report
         assert "2: \\-.!#_@:`<>/ 12.34" in report
 
@@ -186,10 +186,11 @@ class TestMenuCommand:
         """Отправляет меню с клавиатурой."""
         mock_session = AsyncMock()
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_unique_user_ids") as mock_get_users, \
-             patch("bot.routers.menu.get_all_users") as mock_get_all_users:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.routers.menu.get_unique_user_ids") as mock_get_users,
+            patch("bot.routers.menu.get_all_users") as mock_get_all_users,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_users.return_value = [123, 456]
             mock_get_all_users.return_value = []
@@ -335,9 +336,10 @@ class TestHandlePeriodSelection:
         mock_session = AsyncMock()
         mock_costs = [("Продукты", Decimal("100.00"), datetime.now())]
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
 
@@ -354,9 +356,10 @@ class TestHandlePeriodSelection:
         mock_session = AsyncMock()
         mock_months = [(2024, 1), (2024, 2)]
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_months.return_value = mock_months
 
@@ -410,9 +413,10 @@ class TestHandlePeriodSelection:
         mock_session = AsyncMock()
         mock_costs = [("Продукты", Decimal("100.00"), datetime.now())]
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
 
@@ -427,12 +431,13 @@ class TestHandlePeriodSelection:
         callback.data = f"{CALLBACK_PERIOD_PREFIX}123:prev_month"
 
         mock_session = AsyncMock()
-        mock_costs = []
+        mock_costs: list[tuple] = []
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs, \
-             patch("bot.routers.menu.datetime") as mock_datetime:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+            patch("bot.routers.menu.datetime") as mock_datetime,
+        ):
             mock_now = MagicMock()
             mock_now.year = 2026
             mock_now.month = 1  # January
@@ -447,7 +452,7 @@ class TestHandlePeriodSelection:
             mock_get_costs.assert_called_once()
             call_args = mock_get_costs.call_args
             assert call_args[0][2] == 2025  # year
-            assert call_args[0][3] == 12    # month
+            assert call_args[0][3] == 12  # month
 
     @pytest.mark.asyncio
     async def test_unknown_period_returns_error(self, callback):
@@ -487,9 +492,10 @@ class TestHandleMonthSelection:
         mock_session = AsyncMock()
         mock_costs = [("Продукты", Decimal("100.00"), datetime(2024, 1, 15))]
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
 
@@ -575,7 +581,9 @@ class TestBuildPastYearsKeyboard:
         keyboard = build_past_years_keyboard()
 
         for row in keyboard.inline_keyboard:
-            assert row[0].callback_data.startswith(CALLBACK_ENTER_PAST_YEAR)
+            cb = row[0].callback_data
+            assert cb is not None
+            assert cb.startswith(CALLBACK_ENTER_PAST_YEAR)
 
 
 class TestBuildPastMonthsKeyboard:
@@ -584,6 +592,7 @@ class TestBuildPastMonthsKeyboard:
     def test_past_year_shows_all_months(self):
         """Для прошлого года показываются все 12 месяцев."""
         from datetime import datetime
+
         past_year = datetime.now().year - 1
 
         keyboard = build_past_months_keyboard(past_year)
@@ -595,6 +604,7 @@ class TestBuildPastMonthsKeyboard:
     def test_current_year_shows_only_past_months(self):
         """Для текущего года показываются только прошлые месяцы."""
         from datetime import datetime
+
         current_year = datetime.now().year
         current_month = datetime.now().month
 
@@ -610,8 +620,10 @@ class TestBuildPastMonthsKeyboard:
 
         for row in keyboard.inline_keyboard:
             for btn in row:
-                assert btn.callback_data.startswith(CALLBACK_ENTER_PAST_MONTH)
-                assert "2024:" in btn.callback_data
+                cb = btn.callback_data
+                assert cb is not None
+                assert cb.startswith(CALLBACK_ENTER_PAST_MONTH)
+                assert "2024:" in cb
 
 
 class TestBuildDisablePastKeyboard:
@@ -895,10 +907,12 @@ class TestHandleDisablePast:
     def mock_state(self):
         """Фикстура FSMContext."""
         state = AsyncMock()
-        state.get_data = AsyncMock(return_value={
-            "past_mode_year": 2024,
-            "past_mode_month": 6,
-        })
+        state.get_data = AsyncMock(
+            return_value={
+                "past_mode_year": 2024,
+                "past_mode_month": 6,
+            }
+        )
         state.set_data = AsyncMock()
         return state
 
@@ -957,11 +971,13 @@ class TestHandleDisablePast:
     async def test_preserves_other_state_data(self, callback):
         """Сохраняет другие данные в state при отключении режима."""
         mock_state = AsyncMock()
-        mock_state.get_data = AsyncMock(return_value={
-            "past_mode_year": 2024,
-            "past_mode_month": 6,
-            "other_key": "other_value",
-        })
+        mock_state.get_data = AsyncMock(
+            return_value={
+                "past_mode_year": 2024,
+                "past_mode_month": 6,
+                "other_key": "other_value",
+            }
+        )
         mock_state.set_data = AsyncMock()
 
         await handle_disable_past(callback, mock_state)
@@ -999,9 +1015,10 @@ class TestShowMonthsList:
 
         mock_session = AsyncMock()
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months:
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months,
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_months.return_value = []
 
@@ -1018,10 +1035,11 @@ class TestShowMonthsList:
 
         mock_session = AsyncMock()
 
-        with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months, \
-             patch("bot.routers.menu.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
-
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months,
+            patch("bot.routers.menu.get_user_by_telegram_id", new=AsyncMock(return_value=None)),
+        ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_months.return_value = []
 

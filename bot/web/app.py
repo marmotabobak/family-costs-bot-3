@@ -3,6 +3,7 @@
 import json
 import logging
 import secrets
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -196,9 +197,7 @@ async def save_selected(
                     created_at=item["date"],
                 )
             await db_session.commit()
-            logger.debug(
-                "Saved %d items for user %s via web import", len(items_to_save), session["user_id"]
-            )
+            logger.debug("Saved %d items for user %s via web import", len(items_to_save), session["user_id"])
         except SQLAlchemyError:
             logger.exception("DB error during web import for user %s", session["user_id"])
             await db_session.rollback()
@@ -231,7 +230,9 @@ async def save_selected(
 
 # In dev there is no reverse proxy to strip WEB_ROOT_PATH — mount the app under
 # that prefix directly so /bot/costs etc. work out of the box.
-if settings.web_root_path and settings.env == Environment.dev:
+# Guard against pytest: during tests ENV may still read as "dev" because Settings()
+# is instantiated before pytest_configure sets ENV=test.
+if settings.web_root_path and settings.env == Environment.dev and "pytest" not in sys.modules:
     from starlette.applications import Starlette
     from starlette.routing import Mount
 
