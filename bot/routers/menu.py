@@ -14,6 +14,7 @@ from bot.db.repositories.messages import (
     get_unique_user_ids,
     get_user_costs_by_month,
 )
+from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
 from aiogram.enums import ParseMode
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ MONTH_NAMES = [
 ]
 
 
-def build_menu_keyboard(current_user_id: int, all_user_ids: list[int]) -> InlineKeyboardMarkup:
+def build_menu_keyboard(current_user_id: int, user_names: dict[int, str]) -> InlineKeyboardMarkup:
     """Создаёт клавиатуру главного меню с кнопками расходов."""
     buttons = []
 
@@ -44,13 +45,13 @@ def build_menu_keyboard(current_user_id: int, all_user_ids: list[int]) -> Inline
     buttons.append([InlineKeyboardButton(text="📊 Мои расходы", callback_data=CALLBACK_MY_COSTS)])
 
     # Кнопки для каждого пользователя из базы
-    for user_id in all_user_ids:
-        if user_id == current_user_id:
+    for telegram_id, name in user_names.items():
+        if telegram_id == current_user_id:
             continue  # Пропускаем текущего пользователя (у него есть "Мои расходы")
         buttons.append([
             InlineKeyboardButton(
-                text=f"👤 Расходы {user_id}",
-                callback_data=f"{CALLBACK_USER_COSTS_PREFIX}{user_id}",
+                text=f"👤 Расходы {name}",
+                callback_data=f"{CALLBACK_USER_COSTS_PREFIX}{telegram_id}",
             )
         ])
 
@@ -95,17 +96,17 @@ def format_month_report(
     costs: list[tuple[str, Decimal, datetime]],
     year: int,
     month: int,
-    user_id: int,
+    user_name: str,
     is_own: bool,
 ) -> str:
     """Форматирует отчёт по расходам за месяц."""
     month_name = MONTH_NAMES[month]
     header = f"<b>{month_name} {year}</b>"
-    
+
     if not costs:
         if is_own:
             return f"{header}\n\n📭 Нет расходов за этот период."
-        return f"{header}\n\n📭 У пользователя {user_id} нет расходов за этот период."
+        return f"{header}\n\n📭 У пользователя {user_name} нет расходов за этот период."
 
     total = sum(amount for _, amount, _ in costs)
     
@@ -127,8 +128,12 @@ async def menu_command(message: Message):
 
     async with get_session() as session:
         user_ids = await get_unique_user_ids(session)
+        users = await get_all_users(session)
 
-    keyboard = build_menu_keyboard(message.from_user.id, user_ids)
+    users_map = {int(u.telegram_id): str(u.name) for u in users}
+    user_names = {uid: users_map.get(uid, str(uid)) for uid in user_ids}
+
+    keyboard = build_menu_keyboard(message.from_user.id, user_names)
 
     await message.answer("📋 Расходы:", reply_markup=keyboard)
 
@@ -169,11 +174,15 @@ async def handle_user_costs(callback: CallbackQuery):
         target_user_id,
     )
 
+    async with get_session() as session:
+        user = await get_user_by_telegram_id(session, target_user_id)
+    user_name = str(user.name) if user else str(target_user_id)
+
     keyboard = build_period_keyboard(target_user_id, is_own=False)
 
     await callback.answer()
     await callback.message.answer(
-        f"📊 Расходы пользователя {target_user_id}",
+        f"📊 Расходы пользователя {user_name}",
         reply_markup=keyboard,
     )
 
@@ -255,8 +264,13 @@ async def _show_month_report(
 
     async with get_session() as session:
         costs = await get_user_costs_by_month(session, user_id, year, month)
+        if not is_own:
+            user = await get_user_by_telegram_id(session, user_id)
+            user_name = str(user.name) if user else str(user_id)
+        else:
+            user_name = ""
 
-    report = format_month_report(costs, year, month, user_id, is_own)
+    report = format_month_report(costs, year, month, user_name, is_own)
 
     await callback.answer()
     await callback.message.answer(report)
@@ -271,16 +285,21 @@ async def _show_months_list(callback: CallbackQuery, user_id: int, is_own: bool)
 
     async with get_session() as session:
         months = await get_user_available_months(session, user_id)
+        if not is_own:
+            user = await get_user_by_telegram_id(session, user_id)
+            user_name = str(user.name) if user else str(user_id)
+        else:
+            user_name = ""
 
     if not months:
         await callback.answer()
-        msg = "📭 Нет данных о расходах." if is_own else f"📭 У пользователя {user_id} нет данных о расходах."
+        msg = "📭 Нет данных о расходах." if is_own else f"📭 У пользователя {user_name} нет данных о расходах."
         await callback.message.answer(msg)
         return
 
     keyboard = build_months_keyboard(user_id, months)
-    
-    title = "📊 Мои расходы" if is_own else f"📊 Расходы пользователя {user_id}"
+
+    title = "📊 Мои расходы" if is_own else f"📊 Расходы пользователя {user_name}"
     
     await callback.answer()
     await callback.message.answer(title, reply_markup=keyboard)

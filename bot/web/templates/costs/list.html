@@ -17,7 +17,7 @@
                     <th>ID</th>
                     <th>Название</th>
                     <th>Сумма</th>
-                    <th>User ID</th>
+                    <th>Пользователь</th>
                     <th>Дата</th>
                     <th>Действия</th>
                 </tr>
@@ -28,7 +28,7 @@
                     <td>{{ cost.id }}</td>
                     <td>{{ cost.name }}</td>
                     <td class="amount {% if cost.amount < 0 %}negative{% endif %}">{{ cost.amount }}</td>
-                    <td>{{ cost.user_id }}</td>
+                    <td>{{ users_map.get(cost.user_id, cost.user_id) }}</td>
                     <td>{{ cost.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
                     <td class="actions">
                         <a href="{{ root_path }}/costs/{{ cost.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
