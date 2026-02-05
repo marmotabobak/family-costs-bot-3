@@ -27,7 +27,7 @@ from bot.constants import (
 from bot.db.dependencies import get_session
 from bot.db.repositories.messages import delete_messages_by_ids, save_message
 from bot.services.message_parser import Cost, parse_message
-from bot.utils import pluralize
+from bot.utils import format_amount, pluralize
 from bot.exceptions import MessageMaxLineLengthExceed, MessageMaxLengthExceed, MessageMaxLinesCountExceed
 
 
@@ -109,7 +109,7 @@ def format_confirmation_message(
     lines.append("<b>Успешно распарсены строки:</b>")
     lines.append("")
     for cost in valid_costs:
-        lines.append(f"• {esc(cost.name)}: {cost.amount}")
+        lines.append(f"• {esc(cost.name)}: {format_amount(cost.amount, sep='_')}")
 
     lines.append("")
     lines.append("Записать распарсенные строки?")
@@ -123,7 +123,7 @@ def format_success_message(costs: list[Cost]) -> str:
 
     lines = [f"✅ <b>Записано {count} {word}:</b>", ""]
     for cost in costs:
-        lines.append(f"• {esc(cost.name)}: {cost.amount}")
+        lines.append(f"• {esc(cost.name)}: {format_amount(cost.amount, sep='_')}")
 
     return "\n".join(lines)
 
