@@ -696,6 +696,238 @@ class TestCostsCRUDJourney:
             )
         assert r.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_filter_by_name_shows_matching(self, costs_patches, db):
+        """Filter by name shows only matching costs."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Молоко 100")
+            await db.save_message(None, user_id=1, text="Хлеб 50")
+            await db.save_message(None, user_id=1, text="Молоко обезжиренное 200")
+
+            r = await c.get("/costs?filter_name=молоко")
+        assert "Молоко" in r.text
+        assert "обезжиренное" in r.text
+        assert "Хлеб" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_by_user_shows_only_user_costs(self, costs_patches, db):
+        """Filter by user_id shows only that user's costs."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Пользователь1 100")
+            await db.save_message(None, user_id=2, text="Пользователь2 200")
+
+            r = await c.get("/costs?filter_user_id=1")
+        assert "Пользователь1" in r.text
+        assert "Пользователь2" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_by_date_range(self, costs_patches, db):
+        """Filter by date range shows costs within range."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Январь 100", created_at=datetime(2026, 1, 15))
+            await db.save_message(None, user_id=1, text="Февраль 200", created_at=datetime(2026, 2, 15))
+            await db.save_message(None, user_id=1, text="Март 300", created_at=datetime(2026, 3, 15))
+
+            r = await c.get("/costs?filter_date_from=2026-02-01&filter_date_to=2026-02-28")
+        assert "Февраль" in r.text
+        assert "Январь" not in r.text
+        assert "Март" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_by_amount_range(self, costs_patches, db):
+        """Filter by amount range shows costs within range."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Дешёвое 50")
+            await db.save_message(None, user_id=1, text="Среднее 150")
+            await db.save_message(None, user_id=1, text="Дорогое 300")
+
+            r = await c.get("/costs?filter_amount_from=100&filter_amount_to=200")
+        assert "Среднее" in r.text
+        assert "Дешёвое" not in r.text
+        assert "Дорогое" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_combined(self, costs_patches, db):
+        """Multiple filters can be combined."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Молоко дорогое 200")
+            await db.save_message(None, user_id=1, text="Молоко дешёвое 50")
+            await db.save_message(None, user_id=2, text="Молоко другой 200")
+
+            r = await c.get("/costs?filter_name=молоко&filter_user_id=1&filter_amount_from=100")
+        assert "Молоко дорогое" in r.text
+        assert "Молоко дешёвое" not in r.text
+        assert "Молоко другой" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_shows_reset_button(self, costs_patches, db):
+        """When filters are active, reset button is shown."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Тест 100")
+
+            r = await c.get("/costs?filter_name=тест")
+        assert "Сброс" in r.text
+        assert "(отфильтровано)" in r.text
+
+    # --- Filter edge case tests ---
+
+    @pytest.mark.asyncio
+    async def test_filter_empty_user_id_shows_all(self, costs_patches, db):
+        """Empty filter_user_id (selecting 'Все') shows all costs without error."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Пользователь1 100")
+            await db.save_message(None, user_id=2, text="Пользователь2 200")
+
+            # Empty string should not cause int parsing error
+            r = await c.get("/costs?filter_user_id=")
+        assert r.status_code == 200
+        assert "Пользователь1" in r.text
+        assert "Пользователь2" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_invalid_user_id_ignored(self, costs_patches, db):
+        """Non-numeric filter_user_id is ignored (shows all costs)."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Пользователь1 100")
+            await db.save_message(None, user_id=2, text="Пользователь2 200")
+
+            r = await c.get("/costs?filter_user_id=abc")
+        assert r.status_code == 200
+        assert "Пользователь1" in r.text
+        assert "Пользователь2" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_invalid_date_from_ignored(self, costs_patches, db):
+        """Invalid date_from format is ignored (shows all costs)."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Январь 100", created_at=datetime(2026, 1, 15))
+            await db.save_message(None, user_id=1, text="Февраль 200", created_at=datetime(2026, 2, 15))
+
+            r = await c.get("/costs?filter_date_from=not-a-date")
+        assert r.status_code == 200
+        assert "Январь" in r.text
+        assert "Февраль" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_invalid_date_to_ignored(self, costs_patches, db):
+        """Invalid date_to format is ignored (shows all costs)."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Январь 100", created_at=datetime(2026, 1, 15))
+            await db.save_message(None, user_id=1, text="Февраль 200", created_at=datetime(2026, 2, 15))
+
+            r = await c.get("/costs?filter_date_to=invalid")
+        assert r.status_code == 200
+        assert "Январь" in r.text
+        assert "Февраль" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_invalid_amount_from_ignored(self, costs_patches, db):
+        """Invalid amount_from is ignored (shows all costs)."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Дешёвое 50")
+            await db.save_message(None, user_id=1, text="Дорогое 300")
+
+            r = await c.get("/costs?filter_amount_from=xyz")
+        assert r.status_code == 200
+        assert "Дешёвое" in r.text
+        assert "Дорогое" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_invalid_amount_to_ignored(self, costs_patches, db):
+        """Invalid amount_to is ignored (shows all costs)."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Дешёвое 50")
+            await db.save_message(None, user_id=1, text="Дорогое 300")
+
+            r = await c.get("/costs?filter_amount_to=abc")
+        assert r.status_code == 200
+        assert "Дешёвое" in r.text
+        assert "Дорогое" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_only_date_from(self, costs_patches, db):
+        """Filter with only date_from shows costs from that date onwards."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Январь 100", created_at=datetime(2026, 1, 15))
+            await db.save_message(None, user_id=1, text="Февраль 200", created_at=datetime(2026, 2, 15))
+
+            r = await c.get("/costs?filter_date_from=2026-02-01")
+        assert "Февраль" in r.text
+        assert "Январь" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_only_date_to(self, costs_patches, db):
+        """Filter with only date_to shows costs up to that date."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Январь 100", created_at=datetime(2026, 1, 15))
+            await db.save_message(None, user_id=1, text="Февраль 200", created_at=datetime(2026, 2, 15))
+
+            r = await c.get("/costs?filter_date_to=2026-01-31")
+        assert "Январь" in r.text
+        assert "Февраль" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_only_amount_from(self, costs_patches, db):
+        """Filter with only amount_from shows costs >= that amount."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Дешёвое 50")
+            await db.save_message(None, user_id=1, text="Дорогое 300")
+
+            r = await c.get("/costs?filter_amount_from=100")
+        assert "Дорогое" in r.text
+        assert "Дешёвое" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_only_amount_to(self, costs_patches, db):
+        """Filter with only amount_to shows costs <= that amount."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Дешёвое 50")
+            await db.save_message(None, user_id=1, text="Дорогое 300")
+
+            r = await c.get("/costs?filter_amount_to=100")
+        assert "Дешёвое" in r.text
+        assert "Дорогое" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_no_filters_shows_all(self, costs_patches, db):
+        """No filters shows all costs."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Первый 100")
+            await db.save_message(None, user_id=2, text="Второй 200")
+
+            r = await c.get("/costs")
+        assert r.status_code == 200
+        assert "Первый" in r.text
+        assert "Второй" in r.text
+
+    @pytest.mark.asyncio
+    async def test_filter_empty_result(self, costs_patches, db):
+        """Filter that matches nothing shows empty state."""
+        async with _client() as c:
+            await _login(c)
+            await db.save_message(None, user_id=1, text="Молоко 100")
+
+            r = await c.get("/costs?filter_name=несуществующий")
+        assert r.status_code == 200
+        assert "Молоко" not in r.text
+
 
 # ===========================================================================
 # 4. Import Journey

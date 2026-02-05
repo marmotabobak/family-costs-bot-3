@@ -69,6 +69,46 @@ class CostsResponse:
     total_pages: int
 
 
+@dataclass
+class CostsFilter:
+    """Filter parameters for costs list."""
+
+    name: str = ""
+    user_id: int | None = None
+    date_from: str = ""
+    date_to: str = ""
+    amount_from: str = ""
+    amount_to: str = ""
+
+    def is_active(self) -> bool:
+        """Check if any filter is set."""
+        return bool(
+            self.name
+            or self.user_id
+            or self.date_from
+            or self.date_to
+            or self.amount_from
+            or self.amount_to
+        )
+
+    def to_query_string(self) -> str:
+        """Convert filters to URL query string parameters."""
+        params = []
+        if self.name:
+            params.append(f"filter_name={self.name}")
+        if self.user_id:
+            params.append(f"filter_user_id={self.user_id}")
+        if self.date_from:
+            params.append(f"filter_date_from={self.date_from}")
+        if self.date_to:
+            params.append(f"filter_date_to={self.date_to}")
+        if self.amount_from:
+            params.append(f"filter_amount_from={self.amount_from}")
+        if self.amount_to:
+            params.append(f"filter_amount_to={self.amount_to}")
+        return "&".join(params)
+
+
 def parse_message_to_cost(message) -> ParsedCost:
     """Parse Message object to ParsedCost with name and amount extracted."""
     parts = message.text.rsplit(maxsplit=1)
@@ -90,6 +130,52 @@ def parse_message_to_cost(message) -> ParsedCost:
         user_id=message.user_id,
         created_at=message.created_at,
     )
+
+
+def _apply_filters(items: list[ParsedCost], filters: CostsFilter) -> list[ParsedCost]:
+    """Apply filters to a list of parsed costs."""
+    result = items
+
+    # Filter by name (case-insensitive contains)
+    if filters.name:
+        search = filters.name.lower()
+        result = [c for c in result if search in c.name.lower()]
+
+    # Filter by user_id
+    if filters.user_id:
+        result = [c for c in result if c.user_id == filters.user_id]
+
+    # Filter by date range
+    if filters.date_from:
+        try:
+            date_from = datetime.fromisoformat(filters.date_from).date()
+            result = [c for c in result if c.created_at.date() >= date_from]
+        except ValueError:
+            pass  # Invalid date, skip filter
+
+    if filters.date_to:
+        try:
+            date_to = datetime.fromisoformat(filters.date_to).date()
+            result = [c for c in result if c.created_at.date() <= date_to]
+        except ValueError:
+            pass  # Invalid date, skip filter
+
+    # Filter by amount range
+    if filters.amount_from:
+        try:
+            amount_from = Decimal(filters.amount_from.replace(",", "."))
+            result = [c for c in result if c.amount >= amount_from]
+        except (InvalidOperation, ValueError):
+            pass  # Invalid amount, skip filter
+
+    if filters.amount_to:
+        try:
+            amount_to = Decimal(filters.amount_to.replace(",", "."))
+            result = [c for c in result if c.amount <= amount_to]
+        except (InvalidOperation, ValueError):
+            pass  # Invalid amount, skip filter
+
+    return result
 
 
 async def _get_users_for_form():
@@ -130,6 +216,12 @@ async def costs_list(
     per_page: int = 100,
     order_by: str = "created_at",
     order_dir: str = "desc",
+    filter_name: str = "",
+    filter_user_id: str = "",
+    filter_date_from: str = "",
+    filter_date_to: str = "",
+    filter_amount_from: str = "",
+    filter_amount_to: str = "",
 ):
     """Show paginated list of all costs."""
     if not is_authenticated(request):
@@ -144,12 +236,66 @@ async def costs_list(
     if order_by not in ("id", "created_at", "user_id", "name", "amount"):
         order_by = "created_at"
 
+    # Parse filter_user_id (empty string or non-numeric = None)
+    parsed_user_id: int | None = None
+    if filter_user_id:
+        try:
+            parsed_user_id = int(filter_user_id)
+        except ValueError:
+            pass  # Invalid user_id, treat as no filter
+
+    # Build filter object
+    filters = CostsFilter(
+        name=filter_name,
+        user_id=parsed_user_id,
+        date_from=filter_date_from,
+        date_to=filter_date_to,
+        amount_from=filter_amount_from,
+        amount_to=filter_amount_to,
+    )
+
     flash_message, flash_type = get_flash_message(request)
 
     async with get_db_session() as session:
         users = await get_all_users(session)
 
-        if order_by in _DB_SORT_FIELDS:
+        # When filters are active, we need to fetch all data and filter in Python
+        # because name/amount filters require parsing the text field
+        if filters.is_active() or order_by not in _DB_SORT_FIELDS:
+            all_messages = await get_all_messages(session)
+            all_items = [parse_message_to_cost(msg) for msg in all_messages]
+
+            # Apply filters
+            all_items = _apply_filters(all_items, filters)
+
+            # Sort
+            reverse = order_dir == "desc"
+            if order_by == "name":
+                all_items.sort(key=lambda c: c.name.lower(), reverse=reverse)
+            elif order_by == "amount":
+                all_items.sort(key=lambda c: c.amount, reverse=reverse)
+            elif order_by == "id":
+                all_items.sort(key=lambda c: c.id, reverse=reverse)
+            elif order_by == "user_id":
+                all_items.sort(key=lambda c: c.user_id, reverse=reverse)
+            else:  # created_at
+                all_items.sort(key=lambda c: c.created_at, reverse=reverse)
+
+            # Paginate
+            total = len(all_items)
+            total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+            page = max(1, min(page, total_pages))
+            start = (page - 1) * per_page
+            items = all_items[start : start + per_page]
+            costs = CostsResponse(
+                items=items,
+                total=total,
+                page=page,
+                per_page=per_page,
+                total_pages=total_pages,
+            )
+        else:
+            # No filters, use DB-level pagination for efficiency
             paginated = await get_all_costs_paginated(
                 session,
                 page=page,
@@ -164,28 +310,6 @@ async def costs_list(
                 page=paginated.page,
                 per_page=paginated.per_page,
                 total_pages=paginated.total_pages,
-            )
-        else:
-            # name / amount: fetch all, sort in Python, paginate in Python
-            all_messages = await get_all_messages(session)
-            all_items = [parse_message_to_cost(msg) for msg in all_messages]
-            reverse = order_dir == "desc"
-            if order_by == "name":
-                all_items.sort(key=lambda c: c.name.lower(), reverse=reverse)
-            else:  # amount
-                all_items.sort(key=lambda c: c.amount, reverse=reverse)
-
-            total = len(all_items)
-            total_pages = (total + per_page - 1) // per_page if total > 0 else 1
-            page = max(1, min(page, total_pages))
-            start = (page - 1) * per_page
-            items = all_items[start : start + per_page]
-            costs = CostsResponse(
-                items=items,
-                total=total,
-                page=page,
-                per_page=per_page,
-                total_pages=total_pages,
             )
 
     users_map = {u.telegram_id: u.name for u in users}
@@ -203,6 +327,7 @@ async def costs_list(
             "csrf_token": get_csrf_token(request),
             "order_by": order_by,
             "order_dir": order_dir,
+            "filters": filters,
         },
     )
 

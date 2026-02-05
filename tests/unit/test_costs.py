@@ -23,8 +23,10 @@ from bot.web.auth import (
     validate_csrf_token,
 )
 from bot.web.costs import (
+    CostsFilter,
     CostsResponse,
     ParsedCost,
+    _apply_filters,
     parse_message_to_cost,
 )
 
@@ -704,3 +706,148 @@ class TestEdgeCases:
 
         # Cleanup
         auth_sessions.pop(token, None)
+
+
+class TestCostsFilter:
+    """Tests for CostsFilter dataclass."""
+
+    def test_default_values(self):
+        """Filter with no values has defaults."""
+        f = CostsFilter()
+        assert f.name == ""
+        assert f.user_id is None
+        assert f.date_from == ""
+        assert f.date_to == ""
+        assert f.amount_from == ""
+        assert f.amount_to == ""
+
+    def test_is_active_false_when_empty(self):
+        """is_active returns False when no filters set."""
+        f = CostsFilter()
+        assert f.is_active() is False
+
+    def test_is_active_true_with_name(self):
+        """is_active returns True when name is set."""
+        f = CostsFilter(name="test")
+        assert f.is_active() is True
+
+    def test_is_active_true_with_user_id(self):
+        """is_active returns True when user_id is set."""
+        f = CostsFilter(user_id=1)
+        assert f.is_active() is True
+
+    def test_is_active_true_with_date(self):
+        """is_active returns True when date is set."""
+        f = CostsFilter(date_from="2026-01-01")
+        assert f.is_active() is True
+
+    def test_to_query_string_empty(self):
+        """to_query_string returns empty string when no filters."""
+        f = CostsFilter()
+        assert f.to_query_string() == ""
+
+    def test_to_query_string_with_values(self):
+        """to_query_string returns proper query string."""
+        f = CostsFilter(name="test", user_id=1, amount_from="100")
+        qs = f.to_query_string()
+        assert "filter_name=test" in qs
+        assert "filter_user_id=1" in qs
+        assert "filter_amount_from=100" in qs
+
+
+class TestApplyFilters:
+    """Tests for _apply_filters function."""
+
+    def _make_cost(self, id, name, amount, user_id, created_at):
+        return ParsedCost(
+            id=id,
+            name=name,
+            amount=Decimal(str(amount)),
+            user_id=user_id,
+            created_at=created_at,
+        )
+
+    def test_no_filters_returns_all(self):
+        """Empty filter returns all items."""
+        items = [
+            self._make_cost(1, "A", 100, 1, datetime.now()),
+            self._make_cost(2, "B", 200, 2, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter())
+        assert len(result) == 2
+
+    def test_filter_by_name_case_insensitive(self):
+        """Name filter is case-insensitive."""
+        items = [
+            self._make_cost(1, "Молоко", 100, 1, datetime.now()),
+            self._make_cost(2, "Хлеб", 50, 1, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter(name="молок"))
+        assert len(result) == 1
+        assert result[0].name == "Молоко"
+
+    def test_filter_by_user_id(self):
+        """User filter shows only matching user."""
+        items = [
+            self._make_cost(1, "A", 100, 1, datetime.now()),
+            self._make_cost(2, "B", 200, 2, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter(user_id=1))
+        assert len(result) == 1
+        assert result[0].user_id == 1
+
+    def test_filter_by_date_from(self):
+        """Date from filter excludes earlier dates."""
+        items = [
+            self._make_cost(1, "A", 100, 1, datetime(2026, 1, 1)),
+            self._make_cost(2, "B", 200, 1, datetime(2026, 2, 1)),
+        ]
+        result = _apply_filters(items, CostsFilter(date_from="2026-01-15"))
+        assert len(result) == 1
+        assert result[0].id == 2
+
+    def test_filter_by_date_to(self):
+        """Date to filter excludes later dates."""
+        items = [
+            self._make_cost(1, "A", 100, 1, datetime(2026, 1, 1)),
+            self._make_cost(2, "B", 200, 1, datetime(2026, 2, 1)),
+        ]
+        result = _apply_filters(items, CostsFilter(date_to="2026-01-15"))
+        assert len(result) == 1
+        assert result[0].id == 1
+
+    def test_filter_by_amount_from(self):
+        """Amount from filter excludes smaller amounts."""
+        items = [
+            self._make_cost(1, "A", 50, 1, datetime.now()),
+            self._make_cost(2, "B", 150, 1, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter(amount_from="100"))
+        assert len(result) == 1
+        assert result[0].amount == Decimal("150")
+
+    def test_filter_by_amount_to(self):
+        """Amount to filter excludes larger amounts."""
+        items = [
+            self._make_cost(1, "A", 50, 1, datetime.now()),
+            self._make_cost(2, "B", 150, 1, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter(amount_to="100"))
+        assert len(result) == 1
+        assert result[0].amount == Decimal("50")
+
+    def test_invalid_date_ignored(self):
+        """Invalid date filter is skipped."""
+        items = [
+            self._make_cost(1, "A", 100, 1, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter(date_from="not-a-date"))
+        assert len(result) == 1
+
+    def test_invalid_amount_ignored(self):
+        """Invalid amount filter is skipped."""
+        items = [
+            self._make_cost(1, "A", 100, 1, datetime.now()),
+        ]
+        result = _apply_filters(items, CostsFilter(amount_from="not-a-number"))
+        assert len(result) == 1
