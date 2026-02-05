@@ -7,16 +7,13 @@ from bot.constants import MSG_DB_ERROR, MSG_PARSE_ERROR
 from bot.routers.messages import (
     CALLBACK_CANCEL,
     CALLBACK_CONFIRM,
-    CALLBACK_UNDO,
     SaveCostsStates,
     build_confirmation_keyboard,
-    build_success_keyboard,
     format_confirmation_message,
     format_success_message,
     handle_cancel,
     handle_confirm,
     handle_message,
-    handle_undo,
 )
 from bot.services.message_parser import Cost
 from aiogram.types import Message
@@ -110,12 +107,6 @@ class TestBuildConfirmationKeyboard:
         assert buttons[1].callback_data == CALLBACK_CANCEL
 
 
-class TestBuildSuccessKeyboard:
-    def test_has_undo_button(self):
-        keyboard = build_success_keyboard()
-        assert keyboard.inline_keyboard[0][0].callback_data == CALLBACK_UNDO
-
-
 # ======================================================
 # formatters
 # ======================================================
@@ -203,48 +194,3 @@ class TestHandleCancel:
 
         mock_state.clear.assert_called_once()
         cb.message.edit_text.assert_called_once()
-
-
-# ======================================================
-# undo
-# ======================================================
-
-class TestHandleUndo:
-    @pytest.mark.asyncio
-    async def test_undo_uses_fsm_ids(self):
-        cb = MagicMock()
-        cb.from_user.id = 123
-        cb.message = MagicMock(spec=Message)
-        cb.message.edit_text = AsyncMock()
-
-        cb.answer = AsyncMock()
-
-        mock_state = AsyncMock()
-        mock_state.get_data.return_value = {"last_saved_ids": [1, 2, 3]}
-
-        mock_session = AsyncMock()
-        mock_session.commit = AsyncMock()
-
-        with (
-            patch("bot.routers.messages.get_session") as mock_get_session,
-            patch("bot.routers.messages.delete_messages_by_ids") as mock_delete,
-        ):
-            mock_get_session.return_value.__aenter__.return_value = mock_session
-            mock_delete.return_value = 3
-
-            await handle_undo(cb, mock_state)
-
-        mock_delete.assert_called_once_with(mock_session, [1, 2, 3], 123)
-        cb.message.edit_text.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_undo_without_ids(self):
-        cb = MagicMock()
-        cb.answer = AsyncMock()
-
-        mock_state = AsyncMock()
-        mock_state.get_data.return_value = {}
-
-        await handle_undo(cb, mock_state)
-
-        cb.answer.assert_called_once()

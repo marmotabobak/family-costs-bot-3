@@ -1,7 +1,5 @@
 import logging
 import html
-from datetime import datetime, timezone
-from typing import Any
 
 from aiogram import F, Router
 from aiogram.enums import ParseMode
@@ -25,7 +23,7 @@ from bot.constants import (
     MSG_MESSAGE_MAX_LINES_COUNT
 )
 from bot.db.dependencies import get_session
-from bot.db.repositories.messages import delete_messages_by_ids, save_message
+from bot.db.repositories.messages import save_message
 from bot.services.message_parser import Cost, parse_message
 from bot.utils import format_amount, pluralize
 from bot.exceptions import MessageMaxLineLengthExceed, MessageMaxLengthExceed, MessageMaxLinesCountExceed
@@ -36,8 +34,6 @@ router = Router()
 
 CALLBACK_CONFIRM = "confirm_save"
 CALLBACK_CANCEL = "cancel_save"
-CALLBACK_UNDO = "undo_last"
-CALLBACK_DISABLE_PAST = "disable_past"
 
 # =====================
 # FSM
@@ -60,22 +56,6 @@ def build_confirmation_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_success_keyboard(include_disable_past: bool = False) -> InlineKeyboardMarkup:
-    buttons = [[
-        InlineKeyboardButton(text="↩️ Отменить", callback_data=CALLBACK_UNDO)
-    ]]
-
-    if include_disable_past:
-        buttons.append([
-            InlineKeyboardButton(
-                text="⏹️ Отключить прошлое",
-                callback_data=CALLBACK_DISABLE_PAST,
-            )
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
 # =====================
 # HELPERS
 # =====================
@@ -83,14 +63,6 @@ def build_success_keyboard(include_disable_past: bool = False) -> InlineKeyboard
 def esc(text: str) -> str:
     """HTML-экранирование пользовательского ввода."""
     return html.escape(text, quote=False)
-
-
-def get_past_mode_date(state_data: dict) -> datetime | None:
-    year = state_data.get("past_mode_year")
-    month = state_data.get("past_mode_month")
-    if year and month:
-        return datetime(year, month, 1, 12, 0, 0, tzinfo=timezone.utc)
-    return None
 
 
 def format_confirmation_message(
@@ -128,28 +100,22 @@ def format_success_message(costs: list[Cost]) -> str:
     return "\n".join(lines)
 
 
-async def save_costs_to_db(
-    user_id: int,
-    costs: list[Cost],
-    created_at: datetime | None,
-) -> list[int] | None:
+async def save_costs_to_db(user_id: int, costs: list[Cost]) -> bool:
+    """Save costs to DB. Returns True on success."""
     async with get_session() as session:
         try:
-            ids: list[int] = []
             for cost in costs:
-                msg = await save_message(
+                await save_message(
                     session=session,
                     user_id=user_id,
                     text=f"{cost.name} {cost.amount}",
-                    created_at=created_at,
                 )
-                ids.append(int(msg.id))
             await session.commit()
-            return ids
+            return True
         except SQLAlchemyError:
             logger.exception("DB error while saving costs")
             await session.rollback()
-            return None
+            return False
 
 
 # =====================
@@ -184,9 +150,6 @@ async def handle_message(message: Message, state: FSMContext):
         await message.answer(HELP_TEXT)
         return
 
-    state_data = await state.get_data()
-    past_mode_date = get_past_mode_date(state_data)
-
     # Есть нераспарсенные строки → подтверждение
     if result.invalid_lines:
         await state.set_state(SaveCostsStates.waiting_confirmation)
@@ -206,22 +169,16 @@ async def handle_message(message: Message, state: FSMContext):
         return
 
     # Всё распарсилось → сохраняем сразу
-    saved_ids = await save_costs_to_db(
-        message.from_user.id,
-        result.valid_lines,
-        past_mode_date,
-    )
+    success = await save_costs_to_db(message.from_user.id, result.valid_lines)
 
-    if not saved_ids:
+    if not success:
         await message.answer(MSG_DB_ERROR)
         return
 
-    logger.debug("Saved %d costs for user %s: %s", len(saved_ids), message.from_user.id, saved_ids)
-    await state.update_data(last_saved_ids=saved_ids)
+    logger.debug("Saved %d costs for user %s", len(result.valid_lines), message.from_user.id)
 
     await message.answer(
         format_success_message(result.valid_lines),
-        reply_markup=build_success_keyboard(),
         parse_mode=ParseMode.HTML,
     )
 
@@ -240,42 +197,22 @@ async def handle_confirm(callback: CallbackQuery, state: FSMContext):
         await state.clear()
         return
 
-    past_mode_date = get_past_mode_date(data)
+    success = await save_costs_to_db(callback.from_user.id, valid_costs)
 
-    saved_ids = await save_costs_to_db(
-        callback.from_user.id,
-        valid_costs,
-        past_mode_date,
-    )
-
-    if not saved_ids:
+    if not success:
         if isinstance(callback.message, Message):
             await callback.message.edit_text(MSG_DB_ERROR)
         else:
             await callback.answer(MSG_DB_ERROR, show_alert=True)
         return
 
-    # Preserve past mode data before clearing state
-    past_mode_year = data.get("past_mode_year")
-    past_mode_month = data.get("past_mode_month")
-    
     await state.clear()
-    
-    # Restore past mode data and last_saved_ids
-    update_data: dict[str, Any] = {"last_saved_ids": saved_ids}
-    if past_mode_year is not None:
-        update_data["past_mode_year"] = past_mode_year
-    if past_mode_month is not None:
-        update_data["past_mode_month"] = past_mode_month
-    await state.update_data(**update_data)
 
     if isinstance(callback.message, Message):
-        await callback.message.edit_text(
-            format_success_message(valid_costs),
-            reply_markup=build_success_keyboard(),
-        )
+        await callback.message.edit_text(format_success_message(valid_costs))
     else:
         await callback.answer(format_success_message(valid_costs))
+
 
 @router.callback_query(F.data == CALLBACK_CANCEL, SaveCostsStates.waiting_confirmation)
 async def handle_cancel(callback: CallbackQuery, state: FSMContext):
@@ -286,32 +223,3 @@ async def handle_cancel(callback: CallbackQuery, state: FSMContext):
         )
     else:
         await callback.answer("❌ Галя, отмена! Исправьте строки и отправьте сообщение снова.")
-
-
-@router.callback_query(F.data == CALLBACK_UNDO)
-async def handle_undo(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    ids: list[int] | None = data.get("last_saved_ids")
-
-    if not ids:
-        await callback.answer("Нечего отменять", show_alert=True)
-        return
-
-    async with get_session() as session:
-        try:
-            deleted = await delete_messages_by_ids(
-                session,
-                ids,
-                callback.from_user.id,
-            )
-            await session.commit()
-
-            word = pluralize(deleted, "запись", "записи", "записей")
-            if isinstance(callback.message, Message):
-                await callback.message.edit_text(f"↩️ Галя, отмена! Удалено {deleted} {word}.")
-            else:
-                await callback.answer(f"↩️ Галя, отмена! Удалено {deleted} {word}.")
-
-        except SQLAlchemyError:
-            await session.rollback()
-            await callback.answer("Ошибка при удалении", show_alert=True)
