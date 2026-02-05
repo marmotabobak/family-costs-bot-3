@@ -418,3 +418,119 @@ class TestBulkUpdateMessagesUser:
         count = await bulk_update_messages_user(mock_session, [999], new_user_id=42)
 
         assert count == 0
+
+
+class TestGetAllUsersCostsByMonth:
+    """Tests for get_all_users_costs_by_month function."""
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self, mock_session):
+        """Returns empty dict when no costs for month."""
+        from bot.db.repositories.messages import get_all_users_costs_by_month
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_session.execute.return_value = mock_result
+
+        totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)
+
+        assert totals == {}
+
+    @pytest.mark.asyncio
+    async def test_returns_totals_by_user(self, mock_session):
+        """Returns dict of user_id to total amount."""
+        from bot.db.repositories.messages import get_all_users_costs_by_month
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(user_id=123, text="Молоко 100"),
+            MagicMock(user_id=123, text="Хлеб 50"),
+            MagicMock(user_id=456, text="Яблоки 75"),
+        ]
+        mock_session.execute.return_value = mock_result
+
+        totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)
+
+        assert totals == {123: Decimal("150"), 456: Decimal("75")}
+
+    @pytest.mark.asyncio
+    async def test_skips_invalid_format(self, mock_session):
+        """Skips messages with invalid format."""
+        from bot.db.repositories.messages import get_all_users_costs_by_month
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(user_id=123, text="Молоко 100"),
+            MagicMock(user_id=123, text="Невалидная строка"),
+        ]
+        mock_session.execute.return_value = mock_result
+
+        totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)
+
+        assert totals == {123: Decimal("100")}
+
+    @pytest.mark.asyncio
+    async def test_handles_comma_decimal(self, mock_session):
+        """Handles comma as decimal separator."""
+        from bot.db.repositories.messages import get_all_users_costs_by_month
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(user_id=123, text="Молоко 100,50"),
+        ]
+        mock_session.execute.return_value = mock_result
+
+        totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)
+
+        assert totals == {123: Decimal("100.50")}
+
+
+class TestGetAvailableMonths:
+    """Tests for get_available_months function."""
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self, mock_session):
+        """Returns empty list when no data."""
+        from bot.db.repositories.messages import get_available_months
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = []
+        mock_session.execute.return_value = mock_result
+
+        months = await get_available_months(mock_session)
+
+        assert months == []
+
+    @pytest.mark.asyncio
+    async def test_returns_year_month_tuples(self, mock_session):
+        """Returns list of (year, month) tuples for all users."""
+        from bot.db.repositories.messages import get_available_months
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(year=2026, month=1),
+            MagicMock(year=2025, month=12),
+            MagicMock(year=2025, month=11),
+        ]
+        mock_session.execute.return_value = mock_result
+
+        months = await get_available_months(mock_session)
+
+        assert months == [(2026, 1), (2025, 12), (2025, 11)]
+
+    @pytest.mark.asyncio
+    async def test_converts_to_int(self, mock_session):
+        """Converts year and month to int."""
+        from bot.db.repositories.messages import get_available_months
+
+        mock_result = MagicMock()
+        mock_result.all.return_value = [
+            MagicMock(year=2026.0, month=1.0),  # floats from DB
+        ]
+        mock_session.execute.return_value = mock_result
+
+        months = await get_available_months(mock_session)
+
+        assert months == [(2026, 1)]
+        assert isinstance(months[0][0], int)
+        assert isinstance(months[0][1], int)
