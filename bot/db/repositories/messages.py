@@ -374,3 +374,54 @@ async def bulk_update_messages_user(
         .values(user_id=new_user_id)
     )
     return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+async def get_all_users_costs_by_month(
+    session: AsyncSession, year: int, month: int
+) -> dict[int, Decimal]:
+    """Возвращает суммы расходов всех пользователей за конкретный месяц.
+
+    Returns:
+        Словарь {user_id: total_amount}
+    """
+    from sqlalchemy import extract
+
+    result = await session.execute(
+        select(Message.user_id, Message.text)
+        .where(extract("year", Message.created_at) == year)
+        .where(extract("month", Message.created_at) == month)
+    )
+    rows = result.all()
+
+    user_totals: dict[int, Decimal] = {}
+    for row in rows:
+        user_id = row.user_id
+        parts = row.text.rsplit(maxsplit=1)
+        if len(parts) == 2:
+            try:
+                amount = Decimal(parts[1].replace(",", "."))
+                user_totals[user_id] = user_totals.get(user_id, Decimal("0")) + amount
+            except Exception:
+                pass
+
+    return user_totals
+
+
+async def get_available_months(session: AsyncSession) -> list[tuple[int, int]]:
+    """Возвращает список (year, month) для которых есть записи (все пользователи)."""
+    from sqlalchemy import extract
+
+    result = await session.execute(
+        select(
+            extract("year", Message.created_at).label("year"),
+            extract("month", Message.created_at).label("month"),
+        )
+        .group_by("year", "month")
+        .order_by(
+            extract("year", Message.created_at).desc(),
+            extract("month", Message.created_at).desc(),
+        )
+    )
+    rows = result.all()
+
+    return [(int(row.year), int(row.month)) for row in rows]
