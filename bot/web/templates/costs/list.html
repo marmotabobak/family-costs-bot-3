@@ -67,18 +67,6 @@
         </form>
     </div>
 
-    <div class="controls-bar">
-        <div class="per-page-selector">
-            <label>На странице:</label>
-            <select onchange="window.location.href='{{ root_path }}/costs?page=1&per_page=' + this.value + '&order_by={{ order_by }}&order_dir={{ order_dir }}{% if filters.is_active() %}&{{ filters.to_query_string() }}{% endif %}'">
-                {% for n in [20, 50, 100, 200] %}
-                <option value="{{ n }}" {% if costs.per_page == n %}selected{% endif %}>{{ n }}</option>
-                {% endfor %}
-            </select>
-        </div>
-        <span class="total-info">Всего: {{ costs.total }}{% if filters.is_active() %} (отфильтровано){% endif %}</span>
-    </div>
-
     {% if costs.items %}
     <div class="bulk-actions bulk-actions-disabled" id="bulkActions">
         <span id="selectedCount">0 выбрано</span>
@@ -101,6 +89,26 @@
             </select>
             <button type="submit" class="btn btn-secondary btn-small" disabled>Изменить польз.</button>
         </form>
+    </div>
+
+    <div class="controls-bar">
+        <div class="per-page-selector">
+            <label>На странице:</label>
+            <select onchange="window.location.href='{{ root_path }}/costs?page=1&per_page=' + this.value + '&order_by={{ order_by }}&order_dir={{ order_dir }}{% if filters.is_active() %}&{{ filters.to_query_string() }}{% endif %}'">
+                {% for n in [20, 50, 100, 200] %}
+                <option value="{{ n }}" {% if costs.per_page == n %}selected{% endif %}>{{ n }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="pagination-inline">
+            {% if costs.page > 1 %}
+            <a href="{{ root_path }}/costs?page={{ costs.page - 1 }}&per_page={{ costs.per_page }}&order_by={{ order_by }}&order_dir={{ order_dir }}{% if filters.is_active() %}&{{ filters.to_query_string() }}{% endif %}" class="btn btn-secondary btn-small">&laquo; Назад</a>
+            {% endif %}
+            <span class="page-info">Страница {{ costs.page }} из {{ costs.total_pages }} (всего: {{ costs.total }}){% if filters.is_active() %} (отфильтровано){% endif %}</span>
+            {% if costs.page < costs.total_pages %}
+            <a href="{{ root_path }}/costs?page={{ costs.page + 1 }}&per_page={{ costs.per_page }}&order_by={{ order_by }}&order_dir={{ order_dir }}{% if filters.is_active() %}&{{ filters.to_query_string() }}{% endif %}" class="btn btn-secondary btn-small">Вперёд &raquo;</a>
+            {% endif %}
+        </div>
     </div>
 
     <div class="costs-table-wrapper">
@@ -137,20 +145,6 @@
             </tbody>
         </table>
     </div>
-
-    {% if costs.total_pages > 1 %}
-    <div class="pagination">
-        {% if costs.page > 1 %}
-        <a href="{{ root_path }}/costs?page={{ costs.page - 1 }}&per_page={{ costs.per_page }}&order_by={{ order_by }}&order_dir={{ order_dir }}{% if filters.is_active() %}&{{ filters.to_query_string() }}{% endif %}" class="btn btn-secondary">&laquo; Назад</a>
-        {% endif %}
-
-        <span class="page-info">Страница {{ costs.page }} из {{ costs.total_pages }} (всего: {{ costs.total }})</span>
-
-        {% if costs.page < costs.total_pages %}
-        <a href="{{ root_path }}/costs?page={{ costs.page + 1 }}&per_page={{ costs.per_page }}&order_by={{ order_by }}&order_dir={{ order_dir }}{% if filters.is_active() %}&{{ filters.to_query_string() }}{% endif %}" class="btn btn-secondary">Вперёд &raquo;</a>
-        {% endif %}
-    </div>
-    {% endif %}
 
     {% else %}
     <p class="empty-message">Расходов пока нет. <a href="{{ root_path }}/costs/add">Добавьте первый!</a></p>
