@@ -1,7 +1,7 @@
 """End-to-end tests for costs management with real database."""
 
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -47,23 +47,31 @@ def authenticated_client(client):
     return client, csrf_token
 
 
+@pytest.fixture
+def mock_users_form():
+    """Mock _get_users_for_form to avoid real DB call on add forms."""
+    with patch("bot.web.costs._get_users_for_form", new=AsyncMock(return_value=[])):
+        yield
+
+
 class TestAuthenticationFlow:
     """E2E tests for authentication flow."""
 
-    @patch("bot.web.costs.settings")
+    @patch("bot.web.auth.settings")
     def test_full_login_flow(self, mock_settings, client):
         """Test complete login -> use -> logout flow."""
         mock_settings.web_password = "e2e-test-password"
         mock_settings.env = Environment.test
+        mock_settings.web_root_path = ""
 
         # 1. Access costs page - should redirect to login
         response = client.get("/costs", follow_redirects=False)
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
         # 2. Login
         response = client.post(
-            "/costs/login",
+            "/login",
             data={"password": "e2e-test-password"},
             follow_redirects=False,
         )
@@ -72,7 +80,7 @@ class TestAuthenticationFlow:
 
         # 3. Access costs page - should work now (with mock to avoid DB)
         with patch("bot.web.costs.get_db_session") as mock_get_session:
-            from unittest.mock import AsyncMock, MagicMock
+            from unittest.mock import MagicMock
 
             mock_session = MagicMock()
             mock_paginated = MagicMock()
@@ -91,19 +99,19 @@ class TestAuthenticationFlow:
                 assert "Расходы" in response.text
 
         # 4. Logout
-        response = client.get("/costs/logout", follow_redirects=False)
+        response = client.get("/logout", follow_redirects=False)
         assert response.status_code == 303
 
         # 5. Access costs page again - should redirect to login
         response = client.get("/costs", follow_redirects=False)
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
 
 class TestValidationE2E:
     """E2E tests for form validation."""
 
-    def test_amount_validation_preserves_form_data(self, authenticated_client):
+    def test_amount_validation_preserves_form_data(self, authenticated_client, mock_users_form):
         """Test that form data is preserved on validation error."""
         client, csrf_token = authenticated_client
 
@@ -121,7 +129,7 @@ class TestValidationE2E:
         assert "Некорректная сумма" in response.text
         assert "Сохраненное имя" in response.text  # Form data preserved
 
-    def test_user_id_validation(self, authenticated_client):
+    def test_user_id_validation(self, authenticated_client, mock_users_form):
         """Test user_id validation."""
         client, csrf_token = authenticated_client
 
@@ -138,7 +146,7 @@ class TestValidationE2E:
         assert response.status_code == 200
         assert "User ID должен быть больше 0" in response.text
 
-    def test_date_validation(self, authenticated_client):
+    def test_date_validation(self, authenticated_client, mock_users_form):
         """Test date validation."""
         client, csrf_token = authenticated_client
 
