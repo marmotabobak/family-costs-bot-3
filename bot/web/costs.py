@@ -127,6 +127,7 @@ async def costs_list(request: Request, page: int = 1):
 
     async with get_db_session() as session:
         paginated = await get_all_costs_paginated(session, page=page, per_page=20)
+        users = await get_all_users(session)
 
         items = [parse_message_to_cost(msg) for msg in paginated.items]
 
@@ -138,11 +139,14 @@ async def costs_list(request: Request, page: int = 1):
             total_pages=paginated.total_pages,
         )
 
+    users_map = {u.telegram_id: u.name for u in users}
+
     return templates.TemplateResponse(
         request,
         "costs/list.html",
         {
             "costs": costs,
+            "users_map": users_map,
             "authenticated": True,
             "flash_message": flash_message,
             "flash_type": flash_type,

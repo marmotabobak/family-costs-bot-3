@@ -38,7 +38,7 @@ class TestBuildMenuKeyboard:
 
     def test_empty_user_list(self):
         """Пустой список пользователей - только кнопка 'Мои расходы'."""
-        keyboard = build_menu_keyboard(current_user_id=123, all_user_ids=[])
+        keyboard = build_menu_keyboard(current_user_id=123, user_names={})
 
         assert len(keyboard.inline_keyboard) == 1
         assert keyboard.inline_keyboard[0][0].text == "📊 Мои расходы"
@@ -46,7 +46,7 @@ class TestBuildMenuKeyboard:
 
     def test_current_user_excluded(self):
         """Текущий пользователь не показывается в списке."""
-        keyboard = build_menu_keyboard(current_user_id=123, all_user_ids=[123, 456, 789])
+        keyboard = build_menu_keyboard(current_user_id=123, user_names={123: "Alice", 456: "Bob", 789: "Carol"})
 
         assert len(keyboard.inline_keyboard) == 3
 
@@ -55,7 +55,7 @@ class TestBuildMenuKeyboard:
 
     def test_all_users_shown(self):
         """Все пользователи кроме текущего показаны."""
-        keyboard = build_menu_keyboard(current_user_id=100, all_user_ids=[123, 456, 789])
+        keyboard = build_menu_keyboard(current_user_id=100, user_names={123: "Alice", 456: "Bob", 789: "Carol"})
 
         assert len(keyboard.inline_keyboard) == 4
 
@@ -123,14 +123,14 @@ class TestFormatMonthReport:
 
     def test_empty_costs_own(self):
         """Пустой отчёт для своих расходов."""
-        report = format_month_report([], year=2024, month=1, user_id=123, is_own=True)
+        report = format_month_report([], year=2024, month=1, user_name="", is_own=True)
 
         assert "Январь 2024" in report
         assert "Нет расходов" in report
 
     def test_empty_costs_other_user(self):
         """Пустой отчёт для чужих расходов."""
-        report = format_month_report([], year=2024, month=1, user_id=456, is_own=False)
+        report = format_month_report([], year=2024, month=1, user_name="456", is_own=False)
 
         assert "Январь 2024" in report
         assert "456" in report
@@ -142,7 +142,7 @@ class TestFormatMonthReport:
             ("Транспорт", Decimal("50.50"), datetime(2024, 1, 20, 12, 30)),
             ("\\-.!#_@:`<>/", Decimal("12.34"), datetime(2024, 1, 2, 3, 4)),
         ]
-        report = format_month_report(costs, year=2024, month=1, user_id=123, is_own=True)
+        report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
 
         assert "<b>Январь 2024</b>" in report
         assert "<b>Всего:</b> 162.84" in report  # total
@@ -187,10 +187,12 @@ class TestMenuCommand:
         mock_session = AsyncMock()
 
         with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.routers.menu.get_unique_user_ids") as mock_get_users:
+             patch("bot.routers.menu.get_unique_user_ids") as mock_get_users, \
+             patch("bot.routers.menu.get_all_users") as mock_get_all_users:
 
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_users.return_value = [123, 456]
+            mock_get_all_users.return_value = []
 
             await menu_command(message)
 
@@ -1017,7 +1019,8 @@ class TestShowMonthsList:
         mock_session = AsyncMock()
 
         with patch("bot.routers.menu.get_session") as mock_get_session, \
-             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months:
+             patch("bot.db.repositories.messages.get_user_available_months") as mock_get_months, \
+             patch("bot.routers.menu.get_user_by_telegram_id", new=AsyncMock(return_value=None)):
 
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_months.return_value = []

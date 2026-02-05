@@ -178,7 +178,7 @@ class TestCostsList:
         assert response.status_code == 303
         assert "/login" in response.headers["location"]
 
-    def test_returns_200_if_authenticated(self, authenticated_client, mock_db_session):
+    def test_returns_200_if_authenticated(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Returns 200 for authenticated user."""
         client, _ = authenticated_client
 
@@ -205,7 +205,7 @@ class TestCostsList:
         assert response.status_code == 200
         assert "Расходы" in response.text
 
-    def test_shows_empty_message(self, authenticated_client, mock_db_session):
+    def test_shows_empty_message(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Shows empty state message when no costs."""
         client, _ = authenticated_client
 
@@ -636,7 +636,7 @@ class TestDatabaseErrorHandling:
 class TestPaginationValidation:
     """Tests for pagination parameter validation."""
 
-    def test_negative_page_parameter(self, authenticated_client, mock_db_session):
+    def test_negative_page_parameter(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Negative page parameter is handled."""
         client, _ = authenticated_client
 
@@ -661,7 +661,7 @@ class TestPaginationValidation:
 
         assert response.status_code == 200
 
-    def test_zero_page_parameter(self, authenticated_client, mock_db_session):
+    def test_zero_page_parameter(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Zero page parameter is handled."""
         client, _ = authenticated_client
 

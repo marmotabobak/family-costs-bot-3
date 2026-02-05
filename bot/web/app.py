@@ -227,3 +227,13 @@ async def save_selected(
         "success.html",
         {"token": token, "saved_count": saved_count, "total_amount": total_amount},
     )
+
+
+# In dev there is no reverse proxy to strip WEB_ROOT_PATH — mount the app under
+# that prefix directly so /bot/costs etc. work out of the box.
+if settings.web_root_path and settings.env == Environment.dev:
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    _inner = app
+    app = Starlette(routes=[Mount(settings.web_root_path, app=_inner)])  # type: ignore[assignment]

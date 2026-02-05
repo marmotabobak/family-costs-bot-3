@@ -93,7 +93,8 @@ class TestAuthenticationFlow:
             mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("bot.web.costs.get_all_costs_paginated", return_value=mock_paginated):
+            with patch("bot.web.costs.get_all_costs_paginated", return_value=mock_paginated), \
+                 patch("bot.web.costs.get_all_users", new=AsyncMock(return_value=[])):
                 response = client.get("/costs")
                 assert response.status_code == 200
                 assert "Расходы" in response.text
