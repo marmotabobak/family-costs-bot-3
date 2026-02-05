@@ -252,6 +252,72 @@ class TestEditUserRoute:
         assert "/users" in response.headers["location"]
 
 
+    @pytest.mark.asyncio
+    async def test_edit_user_empty_name_shows_error(self):
+        """Edit with empty name re-renders form with error."""
+        token, csrf = _setup_auth()
+        user = _make_user(1, 123, "Иван")
+
+        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
+            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "  ", "telegram_id": "123", "csrf_token": csrf},
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "Имя не может быть пустым" in response.text
+
+    @pytest.mark.asyncio
+    async def test_edit_user_invalid_telegram_id_shows_error(self):
+        """Edit with non-numeric telegram_id returns error."""
+        token, csrf = _setup_auth()
+        user = _make_user(1, 123, "Иван")
+
+        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
+            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "Иван", "telegram_id": "xyz", "csrf_token": csrf},
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "Telegram ID должен быть числом" in response.text
+
+    @pytest.mark.asyncio
+    async def test_edit_user_duplicate_telegram_id_shows_error(self):
+        """Edit with a telegram_id already taken by another user shows error."""
+        from sqlalchemy.exc import IntegrityError
+
+        token, csrf = _setup_auth()
+        user = _make_user(1, 123, "Иван")
+
+        async def raise_integrity(*args, **kwargs):
+            raise IntegrityError("duplicate", None, None)
+
+        with patch("bot.web.users.get_db_session", side_effect=_mock_db_session), patch(
+            "bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)
+        ), patch("bot.web.users.update_user", side_effect=raise_integrity):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "Иван", "telegram_id": "999", "csrf_token": csrf},
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "уже существует" in response.text
+
+
 class TestDeleteUserRoute:
     """Tests for POST /users/{id}/delete."""
 

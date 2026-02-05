@@ -407,6 +407,20 @@ class TestUsersCRUDJourney:
         assert "уже существует" in r.text
 
     @pytest.mark.asyncio
+    async def test_edit_validation_empty_name(self, users_patches, db):
+        """Edit with empty name re-renders form with error."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.create_user(None, 100, "Иван")
+
+            r = await c.post(
+                "/users/1/edit",
+                data={"name": "  ", "telegram_id": "100", "csrf_token": csrf},
+            )
+        assert r.status_code == 200
+        assert "Имя не может быть пустым" in r.text
+
+    @pytest.mark.asyncio
     async def test_edit_nonexistent_user_returns_404(self, users_patches, db):
         """GET /users/999/edit when user 999 doesn't exist → 404."""
         async with _client() as c:
@@ -493,6 +507,40 @@ class TestCostsCRUDJourney:
                 data={
                     "name": "X",
                     "amount": "not-a-number",
+                    "user_id": "1",
+                    "csrf_token": csrf,
+                },
+            )
+        assert "Некорректная сумма" in r.text
+
+    @pytest.mark.asyncio
+    async def test_invalid_user_id_shows_error(self, costs_patches, db):
+        """user_id ≤ 0 on add-cost returns validation error."""
+        async with _client() as c:
+            csrf = await _login(c)
+            r = await c.post(
+                "/costs/add",
+                data={
+                    "name": "Тест",
+                    "amount": "10",
+                    "user_id": "0",
+                    "csrf_token": csrf,
+                },
+            )
+        assert "User ID должен быть больше 0" in r.text
+
+    @pytest.mark.asyncio
+    async def test_edit_cost_invalid_amount_shows_error(self, costs_patches, db):
+        """Edit with bad amount keeps form on screen with error."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.save_message(None, user_id=1, text="Старое 50")
+
+            r = await c.post(
+                "/costs/1/edit",
+                data={
+                    "name": "Тест",
+                    "amount": "abc",
                     "user_id": "1",
                     "csrf_token": csrf,
                 },
