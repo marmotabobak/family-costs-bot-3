@@ -387,3 +387,34 @@ class TestSaveMessage:
         await save_message(mock_session, user_id=123, text="Молоко 100")
 
         mock_session.commit.assert_not_called()
+
+
+class TestBulkUpdateMessagesUser:
+    """Tests for bulk_update_messages_user function."""
+
+    @pytest.mark.asyncio
+    async def test_updates_user_for_given_ids(self, mock_session):
+        """Updates user_id for messages with specified IDs."""
+        from bot.db.repositories.messages import bulk_update_messages_user
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 3
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_user(mock_session, [1, 2, 3], new_user_id=42)
+
+        assert count == 3
+        mock_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_no_rows_updated(self, mock_session):
+        """Returns 0 when no rows were updated."""
+        from bot.db.repositories.messages import bulk_update_messages_user
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 0
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_user(mock_session, [999], new_user_id=42)
+
+        assert count == 0

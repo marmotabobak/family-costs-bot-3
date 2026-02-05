@@ -353,3 +353,24 @@ async def bulk_update_messages_date(
         .values(created_at=new_date)
     )
     return result.rowcount or 0  # type: ignore[attr-defined]
+
+
+async def bulk_update_messages_user(
+    session: AsyncSession,
+    message_ids: list[int],
+    new_user_id: int,
+) -> int:
+    """Обновляет user_id для нескольких сообщений.
+
+    Returns:
+        Количество обновлённых записей
+    """
+    from sqlalchemy import update
+    from sqlalchemy.engine import Result
+
+    result: Result[Any] = await session.execute(
+        update(Message)
+        .where(Message.id.in_(message_ids))
+        .values(user_id=new_user_id)
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
