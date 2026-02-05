@@ -113,19 +113,37 @@
     flex-wrap: wrap;
 }
 
+.bulk-actions-disabled {
+    background: #f8f9fa;
+    border-color: #dee2e6;
+}
+
+.bulk-actions-disabled #selectedCount {
+    color: #999;
+}
+
+.bulk-actions button:disabled,
+.bulk-actions input:disabled,
+.bulk-actions select:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 #selectedCount {
     font-weight: 600;
     color: #856404;
     min-width: 80px;
 }
 
-.bulk-date-form {
+.bulk-date-form,
+.bulk-user-form {
     display: flex;
     align-items: center;
     gap: 8px;
 }
 
-.bulk-date-form input[type="date"] {
+.bulk-date-form input[type="date"],
+.bulk-user-form select {
     padding: 6px 10px;
     border: 1px solid #ddd;
     border-radius: 6px;

@@ -15,6 +15,7 @@ from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.messages import (
     bulk_delete_messages,
     bulk_update_messages_date,
+    bulk_update_messages_user,
     delete_message_by_id,
     get_all_costs_paginated,
     get_all_messages,
@@ -194,6 +195,7 @@ async def costs_list(
         "costs/list.html",
         {
             "costs": costs,
+            "users": users,
             "users_map": users_map,
             "authenticated": True,
             "flash_message": flash_message,
@@ -497,6 +499,47 @@ async def bulk_change_date(
     set_flash_message(
         request,
         f"Дата обновлена для {count} {pluralize(count, 'расхода', 'расходов', 'расходов')}",
+        "success",
+    )
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+
+@router.post("/bulk-change-user")
+async def bulk_change_user(
+    request: Request,
+    ids: list[int] = Form(...),
+    new_user_id: int = Form(...),
+    csrf_token: str = Form(""),
+):
+    """Handle bulk user change for selected costs."""
+    if not is_authenticated(request):
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+
+    if not ids:
+        set_flash_message(request, "Не выбрано ничего", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    if new_user_id < 1:
+        set_flash_message(request, "Некорректный пользователь", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    async with get_db_session() as session:
+        try:
+            count = await bulk_update_messages_user(session, ids, new_user_id)
+            await session.commit()
+            logger.info("Bulk updated user for %d costs via web", count)
+        except Exception as e:
+            logger.exception("Error in bulk change user: %s", e)
+            await session.rollback()
+            set_flash_message(request, "Ошибка обновления пользователя", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    set_flash_message(
+        request,
+        f"Пользователь обновлён для {count} {pluralize(count, 'расхода', 'расходов', 'расходов')}",
         "success",
     )
     return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)

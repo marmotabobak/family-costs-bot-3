@@ -144,6 +144,14 @@ class FakeDB:
                 count += 1
         return count
 
+    async def bulk_update_messages_user(self, session, message_ids, new_user_id):
+        count = 0
+        for mid in message_ids:
+            if mid in self.messages:
+                self.messages[mid].user_id = new_user_id
+                count += 1
+        return count
+
 
 SAMPLE_CHECKS = {
     "checks": [
@@ -215,6 +223,7 @@ def costs_patches(db):
         patch("bot.web.costs.delete_message_by_id", new=AsyncMock(side_effect=db.delete_message_by_id)),
         patch("bot.web.costs.bulk_delete_messages", new=AsyncMock(side_effect=db.bulk_delete_messages)),
         patch("bot.web.costs.bulk_update_messages_date", new=AsyncMock(side_effect=db.bulk_update_messages_date)),
+        patch("bot.web.costs.bulk_update_messages_user", new=AsyncMock(side_effect=db.bulk_update_messages_user)),
         patch("bot.web.costs.get_all_users", new=AsyncMock(side_effect=db.get_all_users)),
     ):
         yield
@@ -644,6 +653,48 @@ class TestCostsCRUDJourney:
                 follow_redirects=False,
             )
         assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_bulk_change_user_updates_and_redirects(self, costs_patches, db):
+        """Bulk user change redirects on success and updates user_id."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.save_message(None, user_id=1, text="Тест 50")
+            await db.create_user(None, telegram_id=2, name="Второй")
+
+            r = await c.post(
+                "/costs/bulk-change-user",
+                data={"ids": ["1"], "new_user_id": "2", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+        # Verify user was updated in DB
+        assert db.messages[1].user_id == 2
+
+    @pytest.mark.asyncio
+    async def test_bulk_change_user_invalid_user_redirects(self, costs_patches, db):
+        """Bulk user change with invalid user_id shows error flash."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await db.save_message(None, user_id=1, text="Тест 50")
+
+            r = await c.post(
+                "/costs/bulk-change-user",
+                data={"ids": ["1"], "new_user_id": "0", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_bulk_change_user_csrf_required(self, costs_patches, db):
+        """Bulk user change without valid CSRF → 403."""
+        async with _client() as c:
+            await _login(c)
+            r = await c.post(
+                "/costs/bulk-change-user",
+                data={"ids": ["1"], "new_user_id": "2", "csrf_token": "bad"},
+            )
+        assert r.status_code == 403
 
 
 # ===========================================================================

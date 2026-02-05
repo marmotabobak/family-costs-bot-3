@@ -32,16 +32,26 @@
     </div>
 
     {% if costs.items %}
-    <div class="bulk-actions" id="bulkActions">
+    <div class="bulk-actions bulk-actions-disabled" id="bulkActions">
         <span id="selectedCount">0 выбрано</span>
         <form id="bulkDeleteForm" action="{{ root_path }}/costs/bulk-delete" method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn btn-danger btn-small">Удалить</button>
+            <button type="submit" class="btn btn-danger btn-small" disabled>Удалить</button>
         </form>
         <form id="bulkDateForm" action="{{ root_path }}/costs/bulk-change-date" method="post" class="bulk-date-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="date" name="new_date">
-            <button type="submit" class="btn btn-secondary btn-small">Изменить дату</button>
+            <input type="date" name="new_date" disabled>
+            <button type="submit" class="btn btn-secondary btn-small" disabled>Изменить дату</button>
+        </form>
+        <form id="bulkUserForm" action="{{ root_path }}/costs/bulk-change-user" method="post" class="bulk-user-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <select name="new_user_id" disabled>
+                <option value="">Пользователь</option>
+                {% for user in users %}
+                <option value="{{ user.telegram_id }}">{{ user.name }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-secondary btn-small" disabled>Изменить польз.</button>
         </form>
     </div>
 
@@ -108,17 +118,24 @@
     const countLabel = document.getElementById('selectedCount');
     const deleteForm = document.getElementById('bulkDeleteForm');
     const dateForm = document.getElementById('bulkDateForm');
-
-    bulkBar.style.display = 'none';
+    const userForm = document.getElementById('bulkUserForm');
 
     function updateBulkBar() {
         const checked = [...checkboxes].filter(cb => cb.checked);
-        if (checked.length > 0) {
-            bulkBar.style.display = 'flex';
-            countLabel.textContent = checked.length + ' выбрано';
-        } else {
-            bulkBar.style.display = 'none';
-        }
+        const hasSelection = checked.length > 0;
+
+        // Toggle disabled class on bar
+        bulkBar.classList.toggle('bulk-actions-disabled', !hasSelection);
+
+        // Update count label
+        countLabel.textContent = checked.length + ' выбрано';
+
+        // Enable/disable all form controls
+        bulkBar.querySelectorAll('button, input, select').forEach(el => {
+            el.disabled = !hasSelection;
+        });
+
+        // Update selectAll checkbox state
         selectAll.checked = checked.length === checkboxes.length && checkboxes.length > 0;
         selectAll.indeterminate = checked.length > 0 && checked.length < checkboxes.length;
     }
@@ -158,6 +175,22 @@
         }
         const count = [...checkboxes].filter(cb => cb.checked).length;
         if (!confirm('Изменить дату для ' + count + ' записей на ' + dateInput.value + '?')) {
+            e.preventDefault();
+            return;
+        }
+        addSelectedIds(this);
+    });
+
+    userForm.addEventListener('submit', function(e) {
+        const userSelect = this.querySelector('select[name="new_user_id"]');
+        if (!userSelect.value) {
+            e.preventDefault();
+            alert('Выберите пользователя');
+            return;
+        }
+        const count = [...checkboxes].filter(cb => cb.checked).length;
+        const userName = userSelect.options[userSelect.selectedIndex].text;
+        if (!confirm('Изменить пользователя для ' + count + ' записей на "' + userName + '"?')) {
             e.preventDefault();
             return;
         }
