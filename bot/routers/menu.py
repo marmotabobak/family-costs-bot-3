@@ -6,7 +6,6 @@ from decimal import Decimal
 
 from aiogram import F, Router
 from aiogram.filters import Command
-from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.db.dependencies import get_session
@@ -16,7 +15,6 @@ from bot.db.repositories.messages import (
 )
 from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
 from bot.utils import format_amount
-from aiogram.enums import ParseMode
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -26,10 +24,6 @@ CALLBACK_MY_COSTS = "my_costs"
 CALLBACK_USER_COSTS_PREFIX = "user_costs:"
 CALLBACK_PERIOD_PREFIX = "period:"  # period:<user_id>:<period_type>
 CALLBACK_MONTH_PREFIX = "month:"    # month:<user_id>:<year>:<month>
-CALLBACK_ENTER_PAST = "enter_past"  # начать ввод за прошлый месяц
-CALLBACK_ENTER_PAST_YEAR = "enter_past_year:"  # выбор года для ввода
-CALLBACK_ENTER_PAST_MONTH = "enter_past_month:"  # выбор месяца для ввода
-CALLBACK_DISABLE_PAST = "disable_past"  # отключить режим ввода в прошлое
 
 # Названия месяцев
 MONTH_NAMES = [
@@ -59,24 +53,15 @@ def build_menu_keyboard(current_user_id: int, user_names: dict[int, str]) -> Inl
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_period_keyboard(user_id: int, is_own: bool) -> InlineKeyboardMarkup:
+def build_period_keyboard(user_id: int) -> InlineKeyboardMarkup:
     """Создаёт клавиатуру выбора периода."""
     prefix = f"{CALLBACK_PERIOD_PREFIX}{user_id}:"
-    
+
     buttons = [
         [InlineKeyboardButton(text="📅 Этот месяц", callback_data=f"{prefix}this_month")],
         [InlineKeyboardButton(text="📅 Прошлый месяц", callback_data=f"{prefix}prev_month")],
         [InlineKeyboardButton(text="📅 Другие месяцы", callback_data=f"{prefix}other")],
     ]
-    
-    # Кнопка "Внести расходы за другой месяц" только для своих расходов
-    if is_own:
-        buttons.append([
-            InlineKeyboardButton(
-                text="✏️ Внести расходы за другой месяц",
-                callback_data=CALLBACK_ENTER_PAST,
-            )
-        ])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -148,7 +133,7 @@ async def handle_my_costs(callback: CallbackQuery):
     user_id = callback.from_user.id
     logger.info("User %s opened period selection for their costs", user_id)
 
-    keyboard = build_period_keyboard(user_id, is_own=True)
+    keyboard = build_period_keyboard(user_id)
 
     await callback.answer()
     await callback.message.answer("📊 Мои расходы", reply_markup=keyboard)
@@ -179,7 +164,7 @@ async def handle_user_costs(callback: CallbackQuery):
         user = await get_user_by_telegram_id(session, target_user_id)
     user_name = str(user.name) if user else str(target_user_id)
 
-    keyboard = build_period_keyboard(target_user_id, is_own=False)
+    keyboard = build_period_keyboard(target_user_id)
 
     await callback.answer()
     await callback.message.answer(
@@ -304,171 +289,3 @@ async def _show_months_list(callback: CallbackQuery, user_id: int, is_own: bool)
     
     await callback.answer()
     await callback.message.answer(title, reply_markup=keyboard)
-
-
-# ============== Ввод расходов за другой месяц ==============
-
-def build_past_years_keyboard() -> InlineKeyboardMarkup:
-    """Создаёт клавиатуру для выбора года (текущий и предыдущий)."""
-    now = datetime.now()
-    current_year = now.year
-    
-    buttons = [
-        [InlineKeyboardButton(
-            text=str(current_year),
-            callback_data=f"{CALLBACK_ENTER_PAST_YEAR}{current_year}",
-        )],
-        [InlineKeyboardButton(
-            text=str(current_year - 1),
-            callback_data=f"{CALLBACK_ENTER_PAST_YEAR}{current_year - 1}",
-        )],
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def build_past_months_keyboard(year: int) -> InlineKeyboardMarkup:
-    """Создаёт клавиатуру для выбора месяца (только прошлые месяцы)."""
-    now = datetime.now()
-    current_year = now.year
-    current_month = now.month
-    
-    buttons = []
-    
-    # Для выбранного года показываем только прошлые месяцы
-    if year < current_year:
-        # Прошлый год - показываем все 12 месяцев
-        months_to_show = range(1, 13)
-    else:
-        # Текущий год - только прошлые месяцы (до текущего)
-        months_to_show = range(1, current_month)
-    
-    # Группируем по 3 кнопки в ряд
-    row = []
-    for month in months_to_show:
-        row.append(InlineKeyboardButton(
-            text=MONTH_NAMES[month][:3],  # Янв, Фев, Мар...
-            callback_data=f"{CALLBACK_ENTER_PAST_MONTH}{year}:{month}",
-        ))
-        if len(row) == 3:
-            buttons.append(row)
-            row = []
-    
-    if row:  # Оставшиеся кнопки
-        buttons.append(row)
-    
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-
-def build_disable_past_keyboard() -> InlineKeyboardMarkup:
-    """Создаёт клавиатуру с кнопкой 'Отключить прошлое'."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⏹️ Отключить прошлое", callback_data=CALLBACK_DISABLE_PAST)]
-    ])
-
-
-@router.callback_query(F.data == CALLBACK_ENTER_PAST)
-async def handle_enter_past(callback: CallbackQuery):
-    """Обработчик кнопки 'Внести расходы за другой месяц' - показывает выбор года."""
-    if not callback.from_user or not isinstance(callback.message, Message):
-        return
-
-    logger.info("User %s started entering past costs", callback.from_user.id)
-
-    keyboard = build_past_years_keyboard()
-
-    await callback.answer()
-    await callback.message.answer("📅 Выберите год:", reply_markup=keyboard)
-
-
-@router.callback_query(F.data.startswith(CALLBACK_ENTER_PAST_YEAR))
-async def handle_enter_past_year(callback: CallbackQuery):
-    """Обработчик выбора года для ввода расходов в прошлое."""
-    if not callback.data or not callback.from_user or not isinstance(callback.message, Message):
-        return
-
-    year_str = callback.data.removeprefix(CALLBACK_ENTER_PAST_YEAR)
-
-    try:
-        year = int(year_str)
-    except ValueError:
-        await callback.answer("Ошибка")
-        return
-
-    logger.info("User %s selected year %d for past costs", callback.from_user.id, year)
-
-    keyboard = build_past_months_keyboard(year)
-
-    # Проверяем, есть ли доступные месяцы
-    if not keyboard.inline_keyboard:
-        await callback.answer("Нет доступных прошлых месяцев для этого года", show_alert=True)
-        return
-
-    await callback.answer()
-    await callback.message.answer(f"📅 Выберите месяц ({year}):", reply_markup=keyboard)
-
-
-@router.callback_query(F.data.startswith(CALLBACK_ENTER_PAST_MONTH))
-async def handle_enter_past_month(callback: CallbackQuery, state: FSMContext):
-    """Обработчик выбора месяца для ввода расходов в прошлое - включает режим."""
-    if not callback.data or not callback.from_user or not isinstance(callback.message, Message):
-        return
-
-    # Парсим year:month
-    parts = callback.data.removeprefix(CALLBACK_ENTER_PAST_MONTH).split(":")
-    if len(parts) != 2:
-        await callback.answer("Ошибка")
-        return
-
-    try:
-        year = int(parts[0])
-        month = int(parts[1])
-    except ValueError:
-        await callback.answer("Ошибка")
-        return
-
-    logger.info(
-        "User %s enabled past mode for %s %d",
-        callback.from_user.id,
-        MONTH_NAMES[month],
-        year,
-    )
-
-    # Сохраняем режим в FSM
-    await state.update_data(past_mode_year=year, past_mode_month=month)
-
-    month_name = MONTH_NAMES[month]
-    keyboard = build_disable_past_keyboard()
-
-    await callback.answer()
-    await callback.message.answer(
-        f"⚠️ *Внимание!*\n\n"
-        f"Все последующие расходы будут внесены на 1-е число месяца: *{month_name} {year}*.\n\n"
-        f"Когда захотите отключить режим ввода за прошлые месяца, нажмите кнопку ниже, "
-        f"чтобы новые расходы были записаны по умолчанию — на сегодня.",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=keyboard,
-    )
-
-
-@router.callback_query(F.data == CALLBACK_DISABLE_PAST)
-async def handle_disable_past(callback: CallbackQuery, state: FSMContext):
-    """Обработчик кнопки 'Отключить прошлое' - выключает режим."""
-    if not callback.from_user or not isinstance(callback.message, Message):
-        return
-
-    # Очищаем режим из FSM
-    data = await state.get_data()
-    
-    # Удаляем только past_mode_*, оставляя остальные данные
-    if "past_mode_year" in data or "past_mode_month" in data:
-        data.pop("past_mode_year", None)
-        data.pop("past_mode_month", None)
-        await state.set_data(data)
-
-    logger.info("User %s disabled past mode", callback.from_user.id)
-
-    await callback.answer()
-    await callback.message.edit_text(
-        "✅ Прошлое ушло. Дальнейшие расходы будут занесены на сегодня.",
-        reply_markup=None,
-    )
