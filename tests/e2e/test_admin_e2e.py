@@ -60,7 +60,7 @@ class FakeDB:
     async def create_user(self, session, telegram_id, name):
         for u in self.users.values():
             if u.telegram_id == telegram_id:
-                raise IntegrityError("duplicate", None, None)
+                raise IntegrityError("duplicate", None, Exception("duplicate"))
         uid = self._next_uid
         self._next_uid += 1
         self.users[uid] = self._make_user(uid, telegram_id, name)
