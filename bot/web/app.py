@@ -16,7 +16,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from bot.config import Environment, settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.messages import save_message
+from bot.web.auth import router as auth_router
 from bot.web.costs import router as costs_router
+from bot.web.logs import router as logs_router
+from bot.web.users import router as users_router
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +29,17 @@ import_sessions: dict[str, dict] = {}
 
 app = FastAPI(title="Family Costs Bot - Web UI")
 
-# Register costs management router
+# Register routers
+app.include_router(auth_router)
 app.include_router(costs_router)
+app.include_router(users_router)
+app.include_router(logs_router)
+
+
+@app.get("/")
+async def root_redirect():
+    """Redirect root to costs page (or login if not authenticated)."""
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=307)
 
 
 @app.get("/health")

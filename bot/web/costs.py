@@ -1,11 +1,8 @@
 """Web UI for managing costs (CRUD operations)."""
 
 import logging
-import secrets
-import time
-from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -13,7 +10,7 @@ from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from bot.config import Environment, settings
+from bot.config import settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.messages import (
     delete_message_by_id,
@@ -21,6 +18,14 @@ from bot.db.repositories.messages import (
     get_message_by_id,
     save_message,
     update_message,
+)
+from bot.db.repositories.users import get_all_users
+from bot.web.auth import (
+    get_csrf_token,
+    get_flash_message,
+    is_authenticated,
+    set_flash_message,
+    validate_csrf_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,109 +36,6 @@ router = APIRouter(prefix="/costs", tags=["costs"])
 BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["root_path"] = settings.web_root_path
-
-# In-memory session storage (in production use Redis or DB)
-auth_sessions: dict[str, dict] = {}
-
-# Session cookie name
-SESSION_COOKIE = "costs_session"
-
-# Session lifetime in seconds (24 hours)
-SESSION_LIFETIME = 86400
-
-# Rate limiting: track login attempts per IP
-login_attempts: dict[str, list[float]] = defaultdict(list)
-MAX_LOGIN_ATTEMPTS = 5
-LOGIN_WINDOW_SECONDS = 300  # 5 minutes
-
-
-def generate_session_token() -> str:
-    """Generate a secure session token."""
-    return secrets.token_urlsafe(32)
-
-
-def generate_csrf_token() -> str:
-    """Generate a CSRF token."""
-    return secrets.token_urlsafe(32)
-
-
-def cleanup_expired_sessions() -> None:
-    """Remove expired sessions from memory."""
-    now = datetime.now()
-    expired_tokens = [
-        token
-        for token, session in auth_sessions.items()
-        if (now - session.get("created_at", now)) > timedelta(seconds=SESSION_LIFETIME)
-    ]
-    for token in expired_tokens:
-        del auth_sessions[token]
-
-
-def get_session_from_cookie(request: Request) -> dict | None:
-    """Get session data from cookie, checking expiration."""
-    token = request.cookies.get(SESSION_COOKIE)
-    if not token or token not in auth_sessions:
-        return None
-
-    session = auth_sessions[token]
-
-    # Check session expiration
-    created_at = session.get("created_at")
-    if created_at and (datetime.now() - created_at) > timedelta(seconds=SESSION_LIFETIME):
-        # Session expired, clean it up
-        del auth_sessions[token]
-        return None
-
-    return session
-
-
-def is_authenticated(request: Request) -> bool:
-    """Check if user is authenticated."""
-    session = get_session_from_cookie(request)
-    return session is not None and session.get("authenticated", False)
-
-
-def get_csrf_token(request: Request) -> str | None:
-    """Get CSRF token from session."""
-    session = get_session_from_cookie(request)
-    if session:
-        return session.get("csrf_token")
-    return None
-
-
-def validate_csrf_token(request: Request, token: str) -> bool:
-    """Validate CSRF token."""
-    expected = get_csrf_token(request)
-    if not expected or not token:
-        return False
-    return secrets.compare_digest(expected, token)
-
-
-def check_rate_limit(client_ip: str) -> bool:
-    """Check if IP has exceeded login rate limit. Returns True if allowed."""
-    now = time.time()
-    # Clean old attempts
-    login_attempts[client_ip] = [
-        t for t in login_attempts[client_ip] if now - t < LOGIN_WINDOW_SECONDS
-    ]
-    return len(login_attempts[client_ip]) < MAX_LOGIN_ATTEMPTS
-
-
-def record_login_attempt(client_ip: str) -> None:
-    """Record a login attempt for rate limiting."""
-    login_attempts[client_ip].append(time.time())
-
-
-def cleanup_old_rate_limits() -> None:
-    """Remove old IPs from rate limiting dict."""
-    now = time.time()
-    old_ips = [
-        ip
-        for ip, attempts in login_attempts.items()
-        if not attempts or all(now - t >= LOGIN_WINDOW_SECONDS for t in attempts)
-    ]
-    for ip in old_ips:
-        del login_attempts[ip]
 
 
 @dataclass
@@ -181,29 +83,10 @@ def parse_message_to_cost(message) -> ParsedCost:
     )
 
 
-def get_flash_message(request: Request) -> tuple[str | None, str | None]:
-    """Get flash message from session and clear it."""
-    session = get_session_from_cookie(request)
-    if session:
-        message = session.pop("flash_message", None)
-        msg_type = session.pop("flash_type", "info")
-        return message, msg_type
-    return None, None
-
-
-def set_flash_message(request: Request, message: str, msg_type: str = "info") -> None:
-    """Set flash message in session."""
-    session = get_session_from_cookie(request)
-    if session:
-        session["flash_message"] = message
-        session["flash_type"] = msg_type
-
-
-async def get_cost_for_error_response(cost_id: int) -> ParsedCost | None:
-    """Helper to fetch cost for error response rendering."""
+async def _get_users_for_form():
+    """Fetch users list for form dropdowns."""
     async with get_db_session() as session:
-        message = await get_message_by_id(session, cost_id)
-        return parse_message_to_cost(message) if message else None
+        return await get_all_users(session)
 
 
 def render_form_error(
@@ -211,6 +94,7 @@ def render_form_error(
     error: str,
     cost: ParsedCost | None,
     form_data: dict,
+    users: list,
 ) -> HTMLResponse:
     """Helper to render form with error."""
     return templates.TemplateResponse(
@@ -222,100 +106,9 @@ def render_form_error(
             "authenticated": True,
             "form_data": form_data,
             "csrf_token": get_csrf_token(request),
+            "users": users,
         },
     )
-
-
-# --- Authentication routes ---
-
-
-@router.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-    """Show login form."""
-    # Cleanup expired sessions and old rate limit entries periodically
-    cleanup_expired_sessions()
-    cleanup_old_rate_limits()
-
-    if is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
-
-    return templates.TemplateResponse(
-        request, "costs/login.html", {"authenticated": False}
-    )
-
-
-@router.post("/login")
-async def login(request: Request, password: str = Form(...)):
-    """Handle login form submission."""
-    client_ip = request.client.host if request.client else "unknown"
-
-    # Check rate limit
-    if not check_rate_limit(client_ip):
-        logger.warning("Rate limit exceeded for IP: %s", client_ip)
-        return templates.TemplateResponse(
-            request,
-            "costs/login.html",
-            {
-                "error": "Слишком много попыток входа. Повторите через 5 минут.",
-                "authenticated": False,
-            },
-        )
-
-    if not settings.web_password:
-        return templates.TemplateResponse(
-            request,
-            "costs/login.html",
-            {
-                "error": "Пароль не настроен. Установите WEB_PASSWORD в переменных окружения.",
-                "authenticated": False,
-            },
-        )
-
-    # Use timing-safe comparison to prevent timing attacks
-    password_matches = secrets.compare_digest(
-        password.encode("utf-8"), settings.web_password.encode("utf-8")
-    )
-
-    if not password_matches:
-        record_login_attempt(client_ip)
-        return templates.TemplateResponse(
-            request,
-            "costs/login.html",
-            {"error": "Неверный пароль", "authenticated": False},
-        )
-
-    # Create session with CSRF token
-    token = generate_session_token()
-    csrf_token = generate_csrf_token()
-    auth_sessions[token] = {
-        "authenticated": True,
-        "created_at": datetime.now(),
-        "csrf_token": csrf_token,
-    }
-
-    response = RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        max_age=SESSION_LIFETIME,
-        secure=settings.env == Environment.prod,  # Secure in production
-    )
-    logger.info("User logged in to costs management")
-    return response
-
-
-@router.get("/logout")
-async def logout(request: Request):
-    """Handle logout."""
-    token = request.cookies.get(SESSION_COOKIE)
-    if token and token in auth_sessions:
-        del auth_sessions[token]
-
-    response = RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
-    response.delete_cookie(key=SESSION_COOKIE)
-    return response
 
 
 # --- CRUD routes ---
@@ -325,9 +118,8 @@ async def logout(request: Request):
 async def costs_list(request: Request, page: int = 1):
     """Show paginated list of all costs."""
     if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
-    # Validate page parameter
     if page < 1:
         page = 1
 
@@ -363,7 +155,9 @@ async def costs_list(request: Request, page: int = 1):
 async def add_cost_form(request: Request):
     """Show add cost form."""
     if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+
+    users = await _get_users_for_form()
 
     return templates.TemplateResponse(
         request,
@@ -372,6 +166,7 @@ async def add_cost_form(request: Request):
             "cost": None,
             "authenticated": True,
             "csrf_token": get_csrf_token(request),
+            "users": users,
         },
     )
 
@@ -387,9 +182,8 @@ async def add_cost(
 ):
     """Handle add cost form submission."""
     if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
-    # Validate CSRF token
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
@@ -399,16 +193,17 @@ async def add_cost(
         "user_id": user_id,
         "created_at": created_at,
     }
+    users = await _get_users_for_form()
 
     # Validate amount
     try:
         amount_decimal = Decimal(amount.replace(",", "."))
     except (InvalidOperation, ValueError):
-        return render_form_error(request, "Некорректная сумма", None, form_data)
+        return render_form_error(request, "Некорректная сумма", None, form_data, users)
 
     # Validate user_id
     if user_id < 1:
-        return render_form_error(request, "User ID должен быть больше 0", None, form_data)
+        return render_form_error(request, "User ID должен быть больше 0", None, form_data, users)
 
     # Parse datetime
     parsed_created_at = None
@@ -416,9 +211,8 @@ async def add_cost(
         try:
             parsed_created_at = datetime.fromisoformat(created_at)
         except ValueError:
-            return render_form_error(request, "Некорректная дата", None, form_data)
+            return render_form_error(request, "Некорректная дата", None, form_data, users)
 
-    # Create message text
     text = f"{name} {amount_decimal}"
 
     async with get_db_session() as session:
@@ -435,7 +229,7 @@ async def add_cost(
             logger.exception("Error adding cost: %s", e)
             await session.rollback()
             return render_form_error(
-                request, "Ошибка сохранения в базу данных", None, form_data
+                request, "Ошибка сохранения в базу данных", None, form_data, users
             )
 
     set_flash_message(request, "Расход успешно добавлен", "success")
@@ -446,7 +240,7 @@ async def add_cost(
 async def edit_cost_form(request: Request, cost_id: int):
     """Show edit cost form."""
     if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
     async with get_db_session() as session:
         message = await get_message_by_id(session, cost_id)
@@ -454,6 +248,7 @@ async def edit_cost_form(request: Request, cost_id: int):
             raise HTTPException(status_code=404, detail="Расход не найден")
 
         cost = parse_message_to_cost(message)
+        users = await get_all_users(session)
 
     return templates.TemplateResponse(
         request,
@@ -462,6 +257,7 @@ async def edit_cost_form(request: Request, cost_id: int):
             "cost": cost,
             "authenticated": True,
             "csrf_token": get_csrf_token(request),
+            "users": users,
         },
     )
 
@@ -478,9 +274,8 @@ async def edit_cost(
 ):
     """Handle edit cost form submission."""
     if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
-    # Validate CSRF token
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
@@ -491,17 +286,20 @@ async def edit_cost(
         "created_at": created_at,
     }
 
+    async with get_db_session() as session:
+        users = await get_all_users(session)
+        existing_message = await get_message_by_id(session, cost_id)
+    existing_cost = parse_message_to_cost(existing_message) if existing_message else None
+
     # Validate amount
     try:
         amount_decimal = Decimal(amount.replace(",", "."))
     except (InvalidOperation, ValueError):
-        cost = await get_cost_for_error_response(cost_id)
-        return render_form_error(request, "Некорректная сумма", cost, form_data)
+        return render_form_error(request, "Некорректная сумма", existing_cost, form_data, users)
 
     # Validate user_id
     if user_id < 1:
-        cost = await get_cost_for_error_response(cost_id)
-        return render_form_error(request, "User ID должен быть больше 0", cost, form_data)
+        return render_form_error(request, "User ID должен быть больше 0", existing_cost, form_data, users)
 
     # Parse datetime
     parsed_created_at = None
@@ -509,10 +307,8 @@ async def edit_cost(
         try:
             parsed_created_at = datetime.fromisoformat(created_at)
         except ValueError:
-            cost = await get_cost_for_error_response(cost_id)
-            return render_form_error(request, "Некорректная дата", cost, form_data)
+            return render_form_error(request, "Некорректная дата", existing_cost, form_data, users)
 
-    # Update message
     text = f"{name} {amount_decimal}"
 
     async with get_db_session() as session:
@@ -533,9 +329,8 @@ async def edit_cost(
         except Exception as e:
             logger.exception("Error updating cost: %s", e)
             await session.rollback()
-            cost = await get_cost_for_error_response(cost_id)
             return render_form_error(
-                request, "Ошибка сохранения в базу данных", cost, form_data
+                request, "Ошибка сохранения в базу данных", existing_cost, form_data, users
             )
 
     set_flash_message(request, "Расход успешно обновлён", "success")
@@ -550,9 +345,8 @@ async def delete_cost(
 ):
     """Handle delete cost."""
     if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/costs/login", status_code=303)
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
-    # Validate CSRF token
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from bot.config import Environment
 from bot.web.app import app
-from bot.web.costs import SESSION_COOKIE, auth_sessions, login_attempts
+from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
 
 @pytest.fixture
@@ -54,18 +54,32 @@ def mock_db_session():
     return mock_session
 
 
+@pytest.fixture
+def mock_users_form():
+    """Mock _get_users_for_form to avoid real DB call on add forms."""
+    with patch("bot.web.costs._get_users_for_form", new=AsyncMock(return_value=[])):
+        yield
+
+
+@pytest.fixture
+def mock_get_all_users():
+    """Mock get_all_users to avoid real DB call on edit forms."""
+    with patch("bot.web.costs.get_all_users", new=AsyncMock(return_value=[])):
+        yield
+
+
 class TestLoginPage:
     """Tests for GET /costs/login endpoint."""
 
     def test_returns_200(self, client):
         """Login page returns 200."""
-        response = client.get("/costs/login")
+        response = client.get("/login")
 
         assert response.status_code == 200
 
     def test_contains_password_form(self, client):
         """Login page contains password form."""
-        response = client.get("/costs/login")
+        response = client.get("/login")
 
         assert 'type="password"' in response.text
         assert "Пароль" in response.text
@@ -74,7 +88,7 @@ class TestLoginPage:
         """Redirects to costs list if already authenticated."""
         client, _ = authenticated_client
 
-        response = client.get("/costs/login", follow_redirects=False)
+        response = client.get("/login", follow_redirects=False)
 
         assert response.status_code == 303
         assert "/costs" in response.headers["location"]
@@ -83,14 +97,15 @@ class TestLoginPage:
 class TestLoginEndpoint:
     """Tests for POST /costs/login endpoint."""
 
-    @patch("bot.web.costs.settings")
+    @patch("bot.web.auth.settings")
     def test_login_success(self, mock_settings, client):
         """Successful login sets session cookie."""
         mock_settings.web_password = "correct-password"
         mock_settings.env = Environment.test
+        mock_settings.web_root_path = ""
 
         response = client.post(
-            "/costs/login",
+            "/login",
             data={"password": "correct-password"},
             follow_redirects=False,
         )
@@ -99,43 +114,43 @@ class TestLoginEndpoint:
         assert "/costs" in response.headers["location"]
         assert SESSION_COOKIE in response.cookies
 
-    @patch("bot.web.costs.settings")
+    @patch("bot.web.auth.settings")
     def test_login_wrong_password(self, mock_settings, client):
         """Wrong password shows error."""
         mock_settings.web_password = "correct-password"
 
         response = client.post(
-            "/costs/login",
+            "/login",
             data={"password": "wrong-password"},
         )
 
         assert response.status_code == 200
         assert "Неверный пароль" in response.text
 
-    @patch("bot.web.costs.settings")
+    @patch("bot.web.auth.settings")
     def test_login_no_password_configured(self, mock_settings, client):
         """Shows error when WEB_PASSWORD not set."""
         mock_settings.web_password = ""
 
         response = client.post(
-            "/costs/login",
+            "/login",
             data={"password": "any-password"},
         )
 
         assert response.status_code == 200
         assert "WEB_PASSWORD" in response.text
 
-    @patch("bot.web.costs.settings")
+    @patch("bot.web.auth.settings")
     def test_rate_limiting(self, mock_settings, client):
         """Rate limits login attempts."""
         mock_settings.web_password = "correct-password"
 
         # Make 5 failed attempts
         for _ in range(5):
-            client.post("/costs/login", data={"password": "wrong"})
+            client.post("/login", data={"password": "wrong"})
 
         # 6th attempt should be rate limited
-        response = client.post("/costs/login", data={"password": "wrong"})
+        response = client.post("/login", data={"password": "wrong"})
 
         assert "5 минут" in response.text
 
@@ -147,10 +162,10 @@ class TestLogout:
         """Logout clears session and redirects."""
         client, _ = authenticated_client
 
-        response = client.get("/costs/logout", follow_redirects=False)
+        response = client.get("/logout", follow_redirects=False)
 
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
 
 class TestCostsList:
@@ -161,7 +176,7 @@ class TestCostsList:
         response = client.get("/costs", follow_redirects=False)
 
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
     def test_returns_200_if_authenticated(self, authenticated_client, mock_db_session):
         """Returns 200 for authenticated user."""
@@ -224,9 +239,9 @@ class TestAddCostForm:
         response = client.get("/costs/add", follow_redirects=False)
 
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
-    def test_returns_200_if_authenticated(self, authenticated_client):
+    def test_returns_200_if_authenticated(self, authenticated_client, mock_users_form):
         """Returns 200 for authenticated user."""
         client, _ = authenticated_client
 
@@ -235,7 +250,7 @@ class TestAddCostForm:
         assert response.status_code == 200
         assert "Добавить расход" in response.text
 
-    def test_contains_csrf_token(self, authenticated_client):
+    def test_contains_csrf_token(self, authenticated_client, mock_users_form):
         """Form contains CSRF token."""
         client, csrf_token = authenticated_client
 
@@ -262,7 +277,7 @@ class TestAddCost:
         )
 
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
     def test_requires_valid_csrf(self, authenticated_client):
         """Rejects invalid CSRF token."""
@@ -280,7 +295,7 @@ class TestAddCost:
 
         assert response.status_code == 403
 
-    def test_validates_amount(self, authenticated_client):
+    def test_validates_amount(self, authenticated_client, mock_users_form):
         """Validates amount format."""
         client, csrf_token = authenticated_client
 
@@ -297,7 +312,7 @@ class TestAddCost:
         assert response.status_code == 200
         assert "Некорректная сумма" in response.text
 
-    def test_validates_user_id(self, authenticated_client):
+    def test_validates_user_id(self, authenticated_client, mock_users_form):
         """Validates user_id > 0."""
         client, csrf_token = authenticated_client
 
@@ -314,7 +329,7 @@ class TestAddCost:
         assert response.status_code == 200
         assert "User ID должен быть больше 0" in response.text
 
-    def test_successful_add(self, authenticated_client, mock_db_session):
+    def test_successful_add(self, authenticated_client, mock_db_session, mock_users_form):
         """Successfully adds cost."""
         client, csrf_token = authenticated_client
 
@@ -354,7 +369,7 @@ class TestEditCostForm:
         response = client.get("/costs/1/edit", follow_redirects=False)
 
         assert response.status_code == 303
-        assert "/costs/login" in response.headers["location"]
+        assert "/login" in response.headers["location"]
 
     def test_returns_404_for_missing(self, authenticated_client, mock_db_session):
         """Returns 404 for non-existent cost."""
@@ -371,7 +386,7 @@ class TestEditCostForm:
 
         assert response.status_code == 404
 
-    def test_returns_200_for_existing(self, authenticated_client, mock_db_session):
+    def test_returns_200_for_existing(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Returns 200 for existing cost."""
         client, _ = authenticated_client
 
@@ -413,12 +428,15 @@ class TestEditCost:
 
         assert response.status_code == 403
 
-    def test_successful_edit(self, authenticated_client, mock_db_session):
+    def test_successful_edit(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Successfully edits cost."""
         client, csrf_token = authenticated_client
 
         mock_message = MagicMock()
         mock_message.id = 1
+        mock_message.text = "Хлеб 50"
+        mock_message.user_id = 123
+        mock_message.created_at = datetime.now()
 
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(
@@ -426,17 +444,18 @@ class TestEditCost:
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("bot.web.costs.update_message", return_value=mock_message):
-                response = client.post(
-                    "/costs/1/edit",
-                    data={
-                        "name": "Хлеб",
-                        "amount": "50",
-                        "user_id": "123",
-                        "csrf_token": csrf_token,
-                    },
-                    follow_redirects=False,
-                )
+            with patch("bot.web.costs.get_message_by_id", return_value=mock_message):
+                with patch("bot.web.costs.update_message", return_value=mock_message):
+                    response = client.post(
+                        "/costs/1/edit",
+                        data={
+                            "name": "Хлеб",
+                            "amount": "50",
+                            "user_id": "123",
+                            "csrf_token": csrf_token,
+                        },
+                        follow_redirects=False,
+                    )
 
         assert response.status_code == 303
         assert "/costs" in response.headers["location"]
@@ -535,7 +554,7 @@ class TestCsrfProtection:
 class TestDatabaseErrorHandling:
     """Tests for database error handling."""
 
-    def test_add_handles_db_error(self, authenticated_client, mock_db_session):
+    def test_add_handles_db_error(self, authenticated_client, mock_db_session, mock_users_form):
         """Add endpoint handles database errors gracefully."""
         client, csrf_token = authenticated_client
 
@@ -562,7 +581,7 @@ class TestDatabaseErrorHandling:
         assert response.status_code == 200
         assert "Ошибка сохранения" in response.text
 
-    def test_edit_handles_db_error(self, authenticated_client, mock_db_session):
+    def test_edit_handles_db_error(self, authenticated_client, mock_db_session, mock_get_all_users):
         """Edit endpoint handles database errors gracefully."""
         client, csrf_token = authenticated_client
 
@@ -671,7 +690,7 @@ class TestPaginationValidation:
 class TestEdgeCasesApi:
     """Tests for edge cases in API."""
 
-    def test_add_with_unicode_name(self, authenticated_client, mock_db_session):
+    def test_add_with_unicode_name(self, authenticated_client, mock_db_session, mock_users_form):
         """Add cost with unicode characters in name."""
         client, csrf_token = authenticated_client
 
@@ -701,7 +720,7 @@ class TestEdgeCasesApi:
 
         assert response.status_code == 303
 
-    def test_add_with_comma_decimal(self, authenticated_client, mock_db_session):
+    def test_add_with_comma_decimal(self, authenticated_client, mock_db_session, mock_users_form):
         """Add cost with comma as decimal separator."""
         client, csrf_token = authenticated_client
 
@@ -731,7 +750,7 @@ class TestEdgeCasesApi:
 
         assert response.status_code == 303
 
-    def test_add_with_custom_date(self, authenticated_client, mock_db_session):
+    def test_add_with_custom_date(self, authenticated_client, mock_db_session, mock_users_form):
         """Add cost with custom datetime."""
         client, csrf_token = authenticated_client
 

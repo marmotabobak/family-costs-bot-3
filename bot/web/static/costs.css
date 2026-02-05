@@ -87,6 +87,7 @@
     padding: 12px 8px;
     text-align: left;
     border-bottom: 1px solid #eee;
+    white-space: nowrap;
 }
 
 .costs-table th {
@@ -106,10 +107,6 @@
 
 .costs-table .amount.negative {
     color: #e74c3c;
-}
-
-.costs-table .actions {
-    white-space: nowrap;
 }
 
 /* Buttons */

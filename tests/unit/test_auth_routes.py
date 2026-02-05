@@ -1,0 +1,177 @@
+"""Unit tests for auth routes (login/logout)."""
+
+from datetime import datetime
+from unittest.mock import patch
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from bot.web.app import app
+from bot.web.auth import SESSION_COOKIE, auth_sessions
+
+
+class TestLoginPage:
+    """Tests for GET /login."""
+
+    @pytest.mark.asyncio
+    async def test_returns_200_when_not_authenticated(self):
+        """Login page returns 200 for unauthenticated users."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/login")
+
+        assert response.status_code == 200
+        assert "Пароль" in response.text
+
+    @pytest.mark.asyncio
+    async def test_redirects_when_already_authenticated(self):
+        """Authenticated user is redirected to /costs."""
+        token = "auth-login-page-test"
+        auth_sessions[token] = {"authenticated": True, "created_at": datetime.now(), "csrf_token": "x"}
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/login", cookies={SESSION_COOKIE: token}, follow_redirects=False)
+
+        auth_sessions.pop(token, None)
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+
+class TestLoginPost:
+    """Tests for POST /login."""
+
+    @pytest.mark.asyncio
+    async def test_login_with_correct_password(self):
+        """Correct password creates session and redirects."""
+        with patch("bot.web.auth.settings") as mock_settings:
+            mock_settings.web_password = "secret"
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/login", data={"password": "secret"}, follow_redirects=False
+                )
+
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+        assert SESSION_COOKIE in response.cookies
+
+        # Cleanup session
+        session_token = response.cookies[SESSION_COOKIE]
+        auth_sessions.pop(session_token, None)
+
+    @pytest.mark.asyncio
+    async def test_login_with_wrong_password(self):
+        """Wrong password returns login page with error."""
+        with patch("bot.web.auth.settings") as mock_settings:
+            mock_settings.web_password = "secret"
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post("/login", data={"password": "wrong"})
+
+        assert response.status_code == 200
+        assert "Неверный пароль" in response.text
+
+    @pytest.mark.asyncio
+    async def test_login_when_password_not_configured(self):
+        """Shows error when WEB_PASSWORD not set."""
+        with patch("bot.web.auth.settings") as mock_settings:
+            mock_settings.web_password = ""
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post("/login", data={"password": "anything"})
+
+        assert response.status_code == 200
+        assert "Пароль не настроен" in response.text
+
+    @pytest.mark.asyncio
+    async def test_login_rate_limiting(self):
+        """After MAX_LOGIN_ATTEMPTS failures, login is rate-limited."""
+        from bot.web.auth import login_attempts, MAX_LOGIN_ATTEMPTS
+        import time
+
+        ip = "127.0.0.1"
+
+        with patch("bot.web.auth.settings") as mock_settings:
+            mock_settings.web_password = "secret"
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+
+            # Fill up rate limit
+            login_attempts[ip] = [time.time() for _ in range(MAX_LOGIN_ATTEMPTS)]
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post("/login", data={"password": "wrong"})
+
+        login_attempts.pop(ip, None)
+        assert response.status_code == 200
+        assert "Слишком много попыток" in response.text
+
+
+class TestLogout:
+    """Tests for GET /logout."""
+
+    @pytest.mark.asyncio
+    async def test_logout_deletes_session_and_redirects(self):
+        """Logout removes session and redirects to /login."""
+        token = "logout-test-session"
+        auth_sessions[token] = {"authenticated": True, "created_at": datetime.now(), "csrf_token": "x"}
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/logout", cookies={SESSION_COOKIE: token}, follow_redirects=False)
+
+        assert response.status_code == 303
+        assert "/login" in response.headers["location"]
+        assert token not in auth_sessions
+
+    @pytest.mark.asyncio
+    async def test_logout_without_session_still_redirects(self):
+        """Logout without active session still redirects cleanly."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/logout", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert "/login" in response.headers["location"]
+
+
+class TestRootRedirect:
+    """Tests for GET / root redirect."""
+
+    @pytest.mark.asyncio
+    async def test_root_redirects_to_costs(self):
+        """Root / redirects to /costs."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert "/costs" in response.headers["location"]
+
+
+class TestLogsRoute:
+    """Tests for GET /logs."""
+
+    @pytest.mark.asyncio
+    async def test_logs_redirects_when_not_authenticated(self):
+        """Unauthenticated request redirects to /login."""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/logs", follow_redirects=False)
+
+        assert response.status_code == 303
+        assert "/login" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_logs_returns_200_when_authenticated(self):
+        """Authenticated request returns logs placeholder page."""
+        token = "logs-auth-test"
+        auth_sessions[token] = {"authenticated": True, "created_at": datetime.now(), "csrf_token": "x"}
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/logs", cookies={SESSION_COOKIE: token})
+
+        auth_sessions.pop(token, None)
+        assert response.status_code == 200
+        assert "Раздел пока не реализован" in response.text

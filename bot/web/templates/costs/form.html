@@ -27,8 +27,22 @@
         </div>
 
         <div class="form-group">
-            <label for="user_id">User ID:</label>
-            <input type="number" id="user_id" name="user_id" value="{{ form_data.user_id if form_data else (cost.user_id if cost else '1') }}" required class="form-input" min="1">
+            <label for="user_id">Пользователь:</label>
+            {% if users %}
+            <select id="user_id" name="user_id" required class="form-input">
+                {% for u in users %}
+                <option value="{{ u.telegram_id }}"
+                    {% if form_data and form_data.user_id|string == u.telegram_id|string %}selected
+                    {% elif cost and cost.user_id == u.telegram_id %}selected
+                    {% endif %}>
+                    {{ u.name }} ({{ u.telegram_id }})
+                </option>
+                {% endfor %}
+            </select>
+            {% else %}
+            <input type="number" id="user_id" name="user_id" value="{{ form_data.user_id if form_data else (cost.user_id if cost else '') }}" required class="form-input" min="1">
+            <small class="form-hint">Пользователей нет в базе. Введите Telegram ID вручную.</small>
+            {% endif %}
         </div>
 
         <div class="form-group">

@@ -1,0 +1,34 @@
+{% extends "costs/base.html" %}
+
+{% block title %}{% if user %}Редактирование{% else %}Добавление{% endif %} пользователя{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2>{% if user %}Редактировать пользователя #{{ user.id }}{% else %}Добавить пользователя{% endif %}</h2>
+
+    {% if error %}
+    <div class="alert alert-error">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    <form action="{% if user %}{{ root_path }}/users/{{ user.id }}/edit{% else %}{{ root_path }}/users/add{% endif %}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <div class="form-group">
+            <label for="name">Имя:</label>
+            <input type="text" id="name" name="name" value="{{ form_data.name if form_data else (user.name if user else '') }}" required class="form-input" placeholder="Например: Иван">
+        </div>
+
+        <div class="form-group">
+            <label for="telegram_id">Telegram ID:</label>
+            <input type="number" id="telegram_id" name="telegram_id" value="{{ form_data.telegram_id if form_data else (user.telegram_id if user else '') }}" required class="form-input" min="1" placeholder="Например: 123456789">
+        </div>
+
+        <div class="form-actions">
+            <a href="{{ root_path }}/users" class="btn btn-secondary">Отмена</a>
+            <button type="submit" class="btn btn-primary">{% if user %}Сохранить{% else %}Добавить{% endif %}</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

@@ -26,6 +26,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ENV: ${ENV:-prod}
       WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:8000}
+      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS:-}
     depends_on:
       postgres:
         condition: service_healthy

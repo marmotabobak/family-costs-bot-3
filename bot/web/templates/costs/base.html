@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Расходы{% endblock %} | Family Costs Bot</title>
+    <title>{% block title %}Панель управления{% endblock %} | Family Costs Bot</title>
     <link rel="stylesheet" href="{{ root_path }}/static/style.css">
     <link rel="stylesheet" href="{{ root_path }}/static/costs.css">
 </head>
@@ -14,8 +14,9 @@
             {% if authenticated %}
             <nav class="nav-links">
                 <a href="{{ root_path }}/costs">Расходы</a>
-                <a href="{{ root_path }}/costs/add">Добавить</a>
-                <a href="{{ root_path }}/costs/logout" class="logout-link">Выход</a>
+                <a href="{{ root_path }}/users">Пользователи</a>
+                <a href="{{ root_path }}/logs">Логи</a>
+                <a href="{{ root_path }}/logout" class="logout-link">Выход</a>
             </nav>
             {% endif %}
         </header>
@@ -28,7 +29,7 @@
             {% block content %}{% endblock %}
         </main>
         <footer>
-            <p>Управление расходами</p>
+            <p>Панель управления</p>
         </footer>
     </div>
 </body>
