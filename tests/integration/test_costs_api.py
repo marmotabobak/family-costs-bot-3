@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from bot.config import Environment
 from bot.web.app import app
-from bot.web.costs import SESSION_COOKIE, auth_sessions, login_attempts
+from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
 
 @pytest.fixture
