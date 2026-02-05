@@ -217,7 +217,7 @@ async def costs_list(
     order_by: str = "created_at",
     order_dir: str = "desc",
     filter_name: str = "",
-    filter_user_id: int | None = None,
+    filter_user_id: str = "",
     filter_date_from: str = "",
     filter_date_to: str = "",
     filter_amount_from: str = "",
@@ -236,10 +236,18 @@ async def costs_list(
     if order_by not in ("id", "created_at", "user_id", "name", "amount"):
         order_by = "created_at"
 
+    # Parse filter_user_id (empty string or non-numeric = None)
+    parsed_user_id: int | None = None
+    if filter_user_id:
+        try:
+            parsed_user_id = int(filter_user_id)
+        except ValueError:
+            pass  # Invalid user_id, treat as no filter
+
     # Build filter object
     filters = CostsFilter(
         name=filter_name,
-        user_id=filter_user_id,
+        user_id=parsed_user_id,
         date_from=filter_date_from,
         date_to=filter_date_to,
         amount_from=filter_amount_from,
