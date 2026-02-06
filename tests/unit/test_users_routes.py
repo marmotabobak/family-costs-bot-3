@@ -10,11 +10,12 @@ from bot.web.app import app
 from bot.web.auth import auth_sessions
 
 
-def _make_user(id=1, telegram_id=123, name="Иван"):
+def _make_user(id=1, telegram_id=123, name="Иван", role="user"):
     user = MagicMock()
     user.id = id
     user.telegram_id = telegram_id
     user.name = name
+    user.role = role
     user.created_at = MagicMock()
     user.created_at.strftime = MagicMock(return_value="01.01.2026 12:00")
     return user
@@ -25,9 +26,15 @@ async def _mock_db_session():
     yield AsyncMock()
 
 
-def _setup_auth():
-    """Create an authenticated session and return (token, csrf_token)."""
-    token = "test-users-session"
+def _setup_auth(role="admin", telegram_id=111, user_name="Админ"):
+    """Create an authenticated session and return (token, csrf_token).
+
+    Args:
+        role: User role ('admin' or 'user')
+        telegram_id: User's telegram ID
+        user_name: User's display name
+    """
+    token = f"test-users-session-{role}"
     csrf = "test-users-csrf"
     from datetime import datetime
 
@@ -35,6 +42,9 @@ def _setup_auth():
         "authenticated": True,
         "created_at": datetime.now(),
         "csrf_token": csrf,
+        "role": role,
+        "telegram_id": telegram_id,
+        "user_name": user_name,
     }
     return token, csrf
 
@@ -384,3 +394,160 @@ class TestDeleteUserRoute:
 
         assert response.status_code == 303
         assert "/login" in response.headers["location"]
+
+
+class TestRoleBasedAccess:
+    """Tests for admin-only access to users management."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_redirected_from_users_list(self):
+        """Non-admin user is redirected from /users to /costs."""
+        token, _ = _setup_auth(role="user", telegram_id=222, user_name="Обычный")
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/users", cookies={"costs_session": token}, follow_redirects=False)
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_redirected_from_add_user(self):
+        """Non-admin user is redirected from /users/add to /costs."""
+        token, _ = _setup_auth(role="user", telegram_id=222, user_name="Обычный")
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/users/add", cookies={"costs_session": token}, follow_redirects=False)
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_redirected_from_edit_user(self):
+        """Non-admin user is redirected from /users/{id}/edit to /costs."""
+        token, _ = _setup_auth(role="user", telegram_id=222, user_name="Обычный")
+        user = _make_user(1, 123, "Иван", "user")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/users/1/edit", cookies={"costs_session": token}, follow_redirects=False)
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_redirected_from_delete_user(self):
+        """Non-admin user is redirected from delete action to /costs."""
+        token, csrf = _setup_auth(role="user", telegram_id=222, user_name="Обычный")
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/users/1/delete",
+                cookies={"costs_session": token},
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_admin_can_access_users_list(self):
+        """Admin user can access /users."""
+        token, _ = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        users = [_make_user(1, 111, "Админ", "admin"), _make_user(2, 222, "Пользователь", "user")]
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/users", cookies={"costs_session": token})
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "Пользователи" in response.text
+
+    @pytest.mark.asyncio
+    async def test_users_list_shows_role_column(self):
+        """Users list displays role column for each user."""
+        token, _ = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        users = [_make_user(1, 111, "Админ", "admin"), _make_user(2, 222, "Пользователь", "user")]
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/users", cookies={"costs_session": token})
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "Роль" in response.text  # Header
+
+    @pytest.mark.asyncio
+    async def test_add_user_with_role(self):
+        """Admin can add user with role."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        new_user = _make_user(3, 333, "Новый", "user")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.create_user", new=AsyncMock(return_value=new_user)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/add",
+                    cookies={"costs_session": token},
+                    data={"name": "Новый", "telegram_id": "333", "role": "admin", "csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/users" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_add_user_invalid_role_shows_error(self):
+        """Invalid role shows validation error."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/users/add",
+                cookies={"costs_session": token},
+                data={"name": "Тест", "telegram_id": "999", "role": "invalid_role", "csrf_token": csrf},
+            )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "Некорректная роль" in response.text
+
+    @pytest.mark.asyncio
+    async def test_edit_user_with_role(self):
+        """Admin can edit user role."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        user = _make_user(1, 123, "Иван", "user")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user", new=AsyncMock(return_value=user)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "Иван", "telegram_id": "123", "role": "admin", "csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/users" in response.headers["location"]

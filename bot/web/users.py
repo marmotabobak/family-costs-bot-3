@@ -19,7 +19,9 @@ from bot.db.repositories.users import (
 )
 from bot.web.auth import (
     get_csrf_token,
+    get_current_user_name,
     get_flash_message,
+    is_admin,
     is_authenticated,
     set_flash_message,
     validate_csrf_token,
@@ -34,6 +36,27 @@ BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["root_path"] = settings.web_root_path
 
+# Valid role values
+VALID_ROLES = ("admin", "user")
+
+
+def _get_auth_context(request: Request) -> dict:
+    """Get common auth context for templates."""
+    return {
+        "authenticated": True,
+        "user_name": get_current_user_name(request),
+        "is_admin": is_admin(request),
+    }
+
+
+def _require_admin(request: Request) -> RedirectResponse | None:
+    """Check if user is admin, return redirect if not."""
+    if not is_authenticated(request):
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    if not is_admin(request):
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+    return None
+
 
 def _render_form_error(request: Request, error: str, user, form_data: dict | None) -> HTMLResponse:
     """Helper to render user form with error."""
@@ -41,20 +64,22 @@ def _render_form_error(request: Request, error: str, user, form_data: dict | Non
         request,
         "users/form.html",
         {
+            **_get_auth_context(request),
             "user": user,
             "error": error,
             "form_data": form_data,
-            "authenticated": True,
             "csrf_token": get_csrf_token(request),
+            "valid_roles": VALID_ROLES,
         },
     )
 
 
 @router.get("", response_class=HTMLResponse)
 async def users_list(request: Request):
-    """Show list of all users."""
-    if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    """Show list of all users. Admin only."""
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
 
     flash_message, flash_type = get_flash_message(request)
 
@@ -65,28 +90,31 @@ async def users_list(request: Request):
         request,
         "users/list.html",
         {
+            **_get_auth_context(request),
             "users": users,
-            "authenticated": True,
             "flash_message": flash_message,
             "flash_type": flash_type,
             "csrf_token": get_csrf_token(request),
+            "valid_roles": VALID_ROLES,
         },
     )
 
 
 @router.get("/add", response_class=HTMLResponse)
 async def add_user_form(request: Request):
-    """Show add user form."""
-    if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    """Show add user form. Admin only."""
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
 
     return templates.TemplateResponse(
         request,
         "users/form.html",
         {
+            **_get_auth_context(request),
             "user": None,
-            "authenticated": True,
             "csrf_token": get_csrf_token(request),
+            "valid_roles": VALID_ROLES,
         },
     )
 
@@ -96,16 +124,18 @@ async def add_user(
     request: Request,
     name: str = Form(...),
     telegram_id: str = Form(...),
+    role: str = Form("user"),
     csrf_token: str = Form(""),
 ):
-    """Handle add user form submission."""
-    if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    """Handle add user form submission. Admin only."""
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
 
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
-    form_data = {"name": name, "telegram_id": telegram_id}
+    form_data = {"name": name, "telegram_id": telegram_id, "role": role}
 
     # Validate name
     if not name.strip():
@@ -120,11 +150,16 @@ async def add_user(
     if telegram_id_int < 1:
         return _render_form_error(request, "Telegram ID должен быть больше 0", None, form_data)
 
+    # Validate role
+    if role not in VALID_ROLES:
+        return _render_form_error(request, "Некорректная роль", None, form_data)
+
     async with get_db_session() as session:
         try:
-            await create_user(session, telegram_id=telegram_id_int, name=name.strip())
+            user = await create_user(session, telegram_id=telegram_id_int, name=name.strip())
+            user.role = role  # type: ignore[assignment]
             await session.commit()
-            logger.info("Added user telegram_id=%d, name=%s", telegram_id_int, name)
+            logger.info("Added user telegram_id=%d, name=%s, role=%s", telegram_id_int, name, role)
         except IntegrityError:
             await session.rollback()
             return _render_form_error(
@@ -141,9 +176,10 @@ async def add_user(
 
 @router.get("/{user_id}/edit", response_class=HTMLResponse)
 async def edit_user_form(request: Request, user_id: int):
-    """Show edit user form."""
-    if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    """Show edit user form. Admin only."""
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
 
     async with get_db_session() as session:
         user = await get_user_by_id(session, user_id)
@@ -154,9 +190,10 @@ async def edit_user_form(request: Request, user_id: int):
         request,
         "users/form.html",
         {
+            **_get_auth_context(request),
             "user": user,
-            "authenticated": True,
             "csrf_token": get_csrf_token(request),
+            "valid_roles": VALID_ROLES,
         },
     )
 
@@ -167,16 +204,18 @@ async def edit_user(
     user_id: int,
     name: str = Form(...),
     telegram_id: str = Form(...),
+    role: str = Form("user"),
     csrf_token: str = Form(""),
 ):
-    """Handle edit user form submission."""
-    if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    """Handle edit user form submission. Admin only."""
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
 
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
-    form_data = {"name": name, "telegram_id": telegram_id}
+    form_data = {"name": name, "telegram_id": telegram_id, "role": role}
 
     # Fetch existing user for error re-renders (keeps form action correct)
     async with get_db_session() as session:
@@ -195,13 +234,19 @@ async def edit_user(
     if telegram_id_int < 1:
         return _render_form_error(request, "Telegram ID должен быть больше 0", existing_user, form_data)
 
+    # Validate role
+    if role not in VALID_ROLES:
+        return _render_form_error(request, "Некорректная роль", existing_user, form_data)
+
     async with get_db_session() as session:
         try:
-            updated = await update_user(session, user_id, telegram_id=telegram_id_int, name=name.strip())
+            updated = await update_user(
+                session, user_id, telegram_id=telegram_id_int, name=name.strip(), role=role
+            )
             if not updated:
                 raise HTTPException(status_code=404, detail="Пользователь не найден")
             await session.commit()
-            logger.info("Updated user #%d: telegram_id=%d, name=%s", user_id, telegram_id_int, name)
+            logger.info("Updated user #%d: telegram_id=%d, name=%s, role=%s", user_id, telegram_id_int, name, role)
         except IntegrityError:
             await session.rollback()
             return _render_form_error(
@@ -224,9 +269,10 @@ async def delete_user_route(
     user_id: int,
     csrf_token: str = Form(""),
 ):
-    """Handle delete user."""
-    if not is_authenticated(request):
-        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    """Handle delete user. Admin only."""
+    redirect = _require_admin(request)
+    if redirect:
+        return redirect
 
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")

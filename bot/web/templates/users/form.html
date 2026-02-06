@@ -25,6 +25,18 @@
             <input type="number" id="telegram_id" name="telegram_id" value="{{ form_data.telegram_id if form_data else (user.telegram_id if user else '') }}" required class="form-input" min="1" placeholder="Например: 123456789">
         </div>
 
+        <div class="form-group">
+            <label for="role">Роль:</label>
+            <select id="role" name="role" class="form-input">
+                {% set current_role = form_data.role if form_data else (user.role if user else 'user') %}
+                {% for role in valid_roles %}
+                <option value="{{ role }}" {% if role == current_role %}selected{% endif %}>
+                    {{ 'Админ' if role == 'admin' else 'Пользователь' }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
         <div class="form-actions">
             <a href="{{ root_path }}/users" class="btn btn-secondary">Отмена</a>
             <button type="submit" class="btn btn-primary">{% if user %}Сохранить{% else %}Добавить{% endif %}</button>

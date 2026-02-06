@@ -31,13 +31,21 @@ async def create_user(session: AsyncSession, telegram_id: int, name: str) -> Use
     return user
 
 
-async def update_user(session: AsyncSession, user_id: int, telegram_id: int, name: str) -> User | None:
+async def update_user(
+    session: AsyncSession,
+    user_id: int,
+    telegram_id: int,
+    name: str,
+    role: str | None = None,
+) -> User | None:
     """Обновляет пользователя по внутреннему ID (без commit)."""
     user = await get_user_by_id(session, user_id)
     if user is None:
         return None
     user.telegram_id = telegram_id  # type: ignore[assignment]
     user.name = name  # type: ignore[assignment]
+    if role is not None:
+        user.role = role  # type: ignore[assignment]
     await session.flush()
     await session.refresh(user)
     return user

@@ -1,7 +1,8 @@
 """Unit tests for auth routes (login/logout)."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -10,17 +11,38 @@ from bot.web.app import app
 from bot.web.auth import SESSION_COOKIE, auth_sessions
 
 
+def _make_user(id=1, telegram_id=123, name="Иван", role="user"):
+    user = MagicMock()
+    user.id = id
+    user.telegram_id = telegram_id
+    user.name = name
+    user.role = role
+    return user
+
+
+@asynccontextmanager
+async def _mock_db_session():
+    yield AsyncMock()
+
+
 class TestLoginPage:
     """Tests for GET /login."""
 
     @pytest.mark.asyncio
     async def test_returns_200_when_not_authenticated(self):
         """Login page returns 200 for unauthenticated users."""
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-            response = await client.get("/login")
+        users = [_make_user(1, 123, "Иван", "user")]
+
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.get("/login")
 
         assert response.status_code == 200
         assert "Пароль" in response.text
+        assert "Пользователь" in response.text  # User dropdown label
 
     @pytest.mark.asyncio
     async def test_redirects_when_already_authenticated(self):
@@ -41,49 +63,95 @@ class TestLoginPost:
 
     @pytest.mark.asyncio
     async def test_login_with_correct_password(self):
-        """Correct password creates session and redirects."""
-        with patch("bot.web.auth.settings") as mock_settings:
+        """Correct password and valid user creates session and redirects."""
+        user = _make_user(1, 123, "Иван", "user")
+        users = [user]
+
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+        ):
             mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
                 response = await client.post(
-                    "/login", data={"password": "secret"}, follow_redirects=False
+                    "/login", data={"password": "secret", "user_id": "123"}, follow_redirects=False
                 )
 
         assert response.status_code == 303
         assert "/costs" in response.headers["location"]
         assert SESSION_COOKIE in response.cookies
 
-        # Cleanup session
+        # Verify session has user info
         session_token = response.cookies[SESSION_COOKIE]
+        assert auth_sessions[session_token]["telegram_id"] == 123
+        assert auth_sessions[session_token]["user_name"] == "Иван"
+        assert auth_sessions[session_token]["role"] == "user"
+
+        # Cleanup session
         auth_sessions.pop(session_token, None)
 
     @pytest.mark.asyncio
     async def test_login_with_wrong_password(self):
         """Wrong password returns login page with error."""
-        with patch("bot.web.auth.settings") as mock_settings:
+        users = [_make_user(1, 123, "Иван", "user")]
+
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
             mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                response = await client.post("/login", data={"password": "wrong"})
+                response = await client.post("/login", data={"password": "wrong", "user_id": "123"})
 
         assert response.status_code == 200
         assert "Неверный пароль" in response.text
 
     @pytest.mark.asyncio
+    async def test_login_with_invalid_user_id(self):
+        """Invalid user_id returns login page with error."""
+        users = [_make_user(1, 123, "Иван", "user")]
+
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=None)),
+        ):
+            mock_settings.web_password = "secret"
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post("/login", data={"password": "secret", "user_id": "999"})
+
+        assert response.status_code == 200
+        assert "Пользователь не найден" in response.text
+
+    @pytest.mark.asyncio
     async def test_login_when_password_not_configured(self):
         """Shows error when WEB_PASSWORD not set."""
-        with patch("bot.web.auth.settings") as mock_settings:
+        users = [_make_user(1, 123, "Иван", "user")]
+
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
             mock_settings.web_password = ""
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                response = await client.post("/login", data={"password": "anything"})
+                response = await client.post("/login", data={"password": "anything", "user_id": "123"})
 
         assert response.status_code == 200
         assert "Пароль не настроен" in response.text
@@ -95,8 +163,13 @@ class TestLoginPost:
         import time
 
         ip = "127.0.0.1"
+        users = [_make_user(1, 123, "Иван", "user")]
 
-        with patch("bot.web.auth.settings") as mock_settings:
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
             mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
@@ -105,7 +178,7 @@ class TestLoginPost:
             login_attempts[ip] = [time.time() for _ in range(MAX_LOGIN_ATTEMPTS)]
 
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-                response = await client.post("/login", data={"password": "wrong"})
+                response = await client.post("/login", data={"password": "wrong", "user_id": "123"})
 
         login_attempts.pop(ip, None)
         assert response.status_code == 200
@@ -164,10 +237,17 @@ class TestLogsRoute:
         assert "/login" in response.headers["location"]
 
     @pytest.mark.asyncio
-    async def test_logs_returns_200_when_authenticated(self):
-        """Authenticated request returns logs placeholder page."""
-        token = "logs-auth-test"
-        auth_sessions[token] = {"authenticated": True, "created_at": datetime.now(), "csrf_token": "x"}
+    async def test_logs_returns_200_when_admin(self):
+        """Admin request returns logs placeholder page."""
+        token = "logs-admin-test"
+        auth_sessions[token] = {
+            "authenticated": True,
+            "created_at": datetime.now(),
+            "csrf_token": "x",
+            "role": "admin",
+            "telegram_id": 111,
+            "user_name": "Админ",
+        }
 
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.get("/logs", cookies={SESSION_COOKIE: token})
@@ -175,3 +255,23 @@ class TestLogsRoute:
         auth_sessions.pop(token, None)
         assert response.status_code == 200
         assert "Раздел пока не реализован" in response.text
+
+    @pytest.mark.asyncio
+    async def test_logs_redirects_non_admin_to_costs(self):
+        """Non-admin user is redirected from /logs to /costs."""
+        token = "logs-user-test"
+        auth_sessions[token] = {
+            "authenticated": True,
+            "created_at": datetime.now(),
+            "csrf_token": "x",
+            "role": "user",
+            "telegram_id": 222,
+            "user_name": "Пользователь",
+        }
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.get("/logs", cookies={SESSION_COOKIE: token}, follow_redirects=False)
+
+        auth_sessions.pop(token, None)
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]

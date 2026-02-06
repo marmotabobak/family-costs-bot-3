@@ -28,12 +28,23 @@
 
         <div class="form-group">
             <label for="user_id">Пользователь:</label>
-            {% if users %}
+            {% if cost and not is_admin %}
+            {# Non-admin editing: show current user as text, submit as hidden #}
+            {% set current_user_name = '' %}
+            {% for u in users %}
+                {% if u.telegram_id == cost.user_id %}
+                    {% set current_user_name = u.name %}
+                {% endif %}
+            {% endfor %}
+            <input type="text" value="{{ current_user_name }} ({{ cost.user_id }})" class="form-input" disabled>
+            <input type="hidden" name="user_id" value="{{ cost.user_id }}">
+            {% elif users %}
             <select id="user_id" name="user_id" required class="form-input">
                 {% for u in users %}
                 <option value="{{ u.telegram_id }}"
                     {% if form_data and form_data.user_id|string == u.telegram_id|string %}selected
                     {% elif cost and cost.user_id == u.telegram_id %}selected
+                    {% elif not cost and u.telegram_id == current_user_telegram_id %}selected
                     {% endif %}>
                     {{ u.name }} ({{ u.telegram_id }})
                 </option>

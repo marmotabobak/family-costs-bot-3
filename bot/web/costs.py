@@ -27,7 +27,11 @@ from bot.db.repositories.users import get_all_users
 from bot.utils import format_amount, pluralize
 from bot.web.auth import (
     get_csrf_token,
+    get_current_user_name,
+    get_current_user_role,
+    get_current_user_telegram_id,
     get_flash_message,
+    is_admin,
     is_authenticated,
     set_flash_message,
     validate_csrf_token,
@@ -184,6 +188,16 @@ async def _get_users_for_form():
         return await get_all_users(session)
 
 
+def _get_auth_context(request: Request) -> dict:
+    """Get common auth context for templates."""
+    return {
+        "authenticated": True,
+        "user_name": get_current_user_name(request),
+        "is_admin": is_admin(request),
+        "current_user_telegram_id": get_current_user_telegram_id(request),
+    }
+
+
 def render_form_error(
     request: Request,
     error: str,
@@ -196,9 +210,9 @@ def render_form_error(
         request,
         "costs/form.html",
         {
+            **_get_auth_context(request),
             "error": error,
             "cost": cost,
-            "authenticated": True,
             "form_data": form_data,
             "csrf_token": get_csrf_token(request),
             "users": users,
@@ -318,10 +332,10 @@ async def costs_list(
         request,
         "costs/list.html",
         {
+            **_get_auth_context(request),
             "costs": costs,
             "users": users,
             "users_map": users_map,
-            "authenticated": True,
             "flash_message": flash_message,
             "flash_type": flash_type,
             "csrf_token": get_csrf_token(request),
@@ -344,8 +358,8 @@ async def add_cost_form(request: Request):
         request,
         "costs/form.html",
         {
+            **_get_auth_context(request),
             "cost": None,
-            "authenticated": True,
             "csrf_token": get_csrf_token(request),
             "users": users,
         },
@@ -431,12 +445,18 @@ async def edit_cost_form(request: Request, cost_id: int):
         cost = parse_message_to_cost(message)
         users = await get_all_users(session)
 
+    # Non-admins can only edit their own costs
+    current_user_id = get_current_user_telegram_id(request)
+    if not is_admin(request) and cost.user_id != current_user_id:
+        set_flash_message(request, "Вы можете редактировать только свои расходы", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
     return templates.TemplateResponse(
         request,
         "costs/form.html",
         {
+            **_get_auth_context(request),
             "cost": cost,
-            "authenticated": True,
             "csrf_token": get_csrf_token(request),
             "users": users,
         },
@@ -460,17 +480,26 @@ async def edit_cost(
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
+    async with get_db_session() as session:
+        users = await get_all_users(session)
+        existing_message = await get_message_by_id(session, cost_id)
+    existing_cost = parse_message_to_cost(existing_message) if existing_message else None
+
+    # Non-admins can only edit their own costs
+    current_user_id = get_current_user_telegram_id(request)
+    if not is_admin(request):
+        if existing_cost and existing_cost.user_id != current_user_id:
+            set_flash_message(request, "Вы можете редактировать только свои расходы", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+        # Non-admins cannot change the user_id
+        user_id = existing_cost.user_id if existing_cost else current_user_id
+
     form_data = {
         "name": name,
         "amount": amount,
         "user_id": user_id,
         "created_at": created_at,
     }
-
-    async with get_db_session() as session:
-        users = await get_all_users(session)
-        existing_message = await get_message_by_id(session, cost_id)
-    existing_cost = parse_message_to_cost(existing_message) if existing_message else None
 
     # Validate amount
     try:
@@ -532,14 +561,20 @@ async def delete_cost(
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
 
     async with get_db_session() as session:
+        # Check ownership for non-admins
+        message = await get_message_by_id(session, cost_id)
+        if not message:
+            raise HTTPException(status_code=404, detail="Расход не найден")
+
+        current_user_id = get_current_user_telegram_id(request)
+        if not is_admin(request) and message.user_id != current_user_id:
+            set_flash_message(request, "Вы можете удалять только свои расходы", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
         try:
-            deleted = await delete_message_by_id(session, cost_id)
-            if not deleted:
-                raise HTTPException(status_code=404, detail="Расход не найден")
+            await delete_message_by_id(session, cost_id)
             await session.commit()
             logger.info("Deleted cost #%d via web", cost_id)
-        except HTTPException:
-            raise
         except Exception as e:
             logger.exception("Error deleting cost: %s", e)
             await session.rollback()
@@ -568,6 +603,20 @@ async def bulk_delete(
         return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
     async with get_db_session() as session:
+        # For non-admins, verify ownership of all selected costs
+        if not is_admin(request):
+            current_user_id = get_current_user_telegram_id(request)
+            all_messages = await get_all_messages(session)
+            messages_map = {m.id: m for m in all_messages}
+            forbidden_ids = [
+                mid for mid in ids if mid in messages_map and messages_map[mid].user_id != current_user_id
+            ]
+            if forbidden_ids:
+                set_flash_message(
+                    request, "Вы можете удалять только свои расходы", "error"
+                )
+                return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
         try:
             count = await bulk_delete_messages(session, ids)
             await session.commit()
@@ -611,6 +660,20 @@ async def bulk_change_date(
         return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
     async with get_db_session() as session:
+        # For non-admins, verify ownership of all selected costs
+        if not is_admin(request):
+            current_user_id = get_current_user_telegram_id(request)
+            all_messages = await get_all_messages(session)
+            messages_map = {m.id: m for m in all_messages}
+            forbidden_ids = [
+                mid for mid in ids if mid in messages_map and messages_map[mid].user_id != current_user_id
+            ]
+            if forbidden_ids:
+                set_flash_message(
+                    request, "Вы можете изменять только свои расходы", "error"
+                )
+                return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
         try:
             count = await bulk_update_messages_date(session, ids, parsed_date)
             await session.commit()
@@ -636,9 +699,14 @@ async def bulk_change_user(
     new_user_id: int = Form(...),
     csrf_token: str = Form(""),
 ):
-    """Handle bulk user change for selected costs."""
+    """Handle bulk user change for selected costs. Admin only."""
     if not is_authenticated(request):
         return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+
+    # Only admins can change user assignment
+    if not is_admin(request):
+        set_flash_message(request, "Только администратор может менять пользователя", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
     if not validate_csrf_token(request, csrf_token):
         raise HTTPException(status_code=403, detail="Invalid CSRF token")
