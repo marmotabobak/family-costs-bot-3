@@ -1,7 +1,8 @@
 """End-to-end tests for costs management with real database."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -35,13 +36,16 @@ def cleanup_sessions():
 
 @pytest.fixture
 def authenticated_client(client):
-    """Create authenticated test client with CSRF token."""
+    """Create authenticated test client with CSRF token (admin role)."""
     token = "e2e-auth-token"
     csrf_token = "e2e-csrf-token"
     auth_sessions[token] = {
         "authenticated": True,
         "created_at": datetime.now(),
         "csrf_token": csrf_token,
+        "role": "admin",
+        "telegram_id": 100,
+        "user_name": "Тест Админ",
     }
     client.cookies.set(SESSION_COOKIE, token)
     return client, csrf_token
@@ -54,6 +58,19 @@ def mock_users_form():
         yield
 
 
+def _make_user(telegram_id=100, name="Тест", role="user"):
+    user = MagicMock()
+    user.telegram_id = telegram_id
+    user.name = name
+    user.role = role
+    return user
+
+
+@asynccontextmanager
+async def _mock_db_session_ctx():
+    yield AsyncMock()
+
+
 class TestAuthenticationFlow:
     """E2E tests for authentication flow."""
 
@@ -63,6 +80,9 @@ class TestAuthenticationFlow:
         mock_settings.web_password = "e2e-test-password"
         mock_settings.env = Environment.test
         mock_settings.web_root_path = ""
+        mock_settings.admin_telegram_id = None
+
+        user = _make_user(100, "Иван", "user")
 
         # 1. Access costs page - should redirect to login
         response = client.get("/costs", follow_redirects=False)
@@ -70,18 +90,21 @@ class TestAuthenticationFlow:
         assert "/login" in response.headers["location"]
 
         # 2. Login
-        response = client.post(
-            "/login",
-            data={"password": "e2e-test-password"},
-            follow_redirects=False,
-        )
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=[user])),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+        ):
+            response = client.post(
+                "/login",
+                data={"password": "e2e-test-password", "user_id": "100"},
+                follow_redirects=False,
+            )
         assert response.status_code == 303
         assert SESSION_COOKIE in response.cookies
 
         # 3. Access costs page - should work now (with mock to avoid DB)
         with patch("bot.web.costs.get_db_session") as mock_get_session:
-            from unittest.mock import MagicMock
-
             mock_session = MagicMock()
             mock_paginated = MagicMock()
             mock_paginated.items = []

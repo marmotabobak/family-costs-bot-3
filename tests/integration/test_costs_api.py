@@ -1,5 +1,6 @@
 """Integration tests for costs management API endpoints."""
 
+from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,14 +28,16 @@ def cleanup_sessions():
 
 @pytest.fixture
 def authenticated_client(client):
-    """Create authenticated test client."""
-    # Create session directly
+    """Create authenticated test client (admin role for full access)."""
     token = "test-auth-token"
     csrf_token = "test-csrf-token"
     auth_sessions[token] = {
         "authenticated": True,
         "created_at": datetime.now(),
         "csrf_token": csrf_token,
+        "role": "admin",
+        "telegram_id": 100,
+        "user_name": "Тест Админ",
     }
 
     # Set cookie on client
@@ -68,18 +71,41 @@ def mock_get_all_users():
         yield
 
 
+def _make_user(telegram_id=100, name="Тест", role="user"):
+    user = MagicMock()
+    user.telegram_id = telegram_id
+    user.name = name
+    user.role = role
+    return user
+
+
+@asynccontextmanager
+async def _mock_db_session_ctx():
+    yield AsyncMock()
+
+
 class TestLoginPage:
-    """Tests for GET /costs/login endpoint."""
+    """Tests for GET /login endpoint."""
 
     def test_returns_200(self, client):
         """Login page returns 200."""
-        response = client.get("/login")
+        users = [_make_user(100, "Иван")]
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            response = client.get("/login")
 
         assert response.status_code == 200
 
     def test_contains_password_form(self, client):
         """Login page contains password form."""
-        response = client.get("/login")
+        users = [_make_user(100, "Иван")]
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            response = client.get("/login")
 
         assert 'type="password"' in response.text
         assert "Пароль" in response.text
@@ -95,7 +121,7 @@ class TestLoginPage:
 
 
 class TestLoginEndpoint:
-    """Tests for POST /costs/login endpoint."""
+    """Tests for POST /login endpoint."""
 
     @patch("bot.web.auth.settings")
     def test_login_success(self, mock_settings, client):
@@ -103,12 +129,19 @@ class TestLoginEndpoint:
         mock_settings.web_password = "correct-password"
         mock_settings.env = Environment.test
         mock_settings.web_root_path = ""
+        mock_settings.admin_telegram_id = None
 
-        response = client.post(
-            "/login",
-            data={"password": "correct-password"},
-            follow_redirects=False,
-        )
+        user = _make_user(100, "Иван", "user")
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=[user])),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+        ):
+            response = client.post(
+                "/login",
+                data={"password": "correct-password", "user_id": "100"},
+                follow_redirects=False,
+            )
 
         assert response.status_code == 303
         assert "/costs" in response.headers["location"]
@@ -118,11 +151,18 @@ class TestLoginEndpoint:
     def test_login_wrong_password(self, mock_settings, client):
         """Wrong password shows error."""
         mock_settings.web_password = "correct-password"
+        mock_settings.web_root_path = ""
+        mock_settings.env = "test"
 
-        response = client.post(
-            "/login",
-            data={"password": "wrong-password"},
-        )
+        users = [_make_user(100, "Иван")]
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            response = client.post(
+                "/login",
+                data={"password": "wrong-password", "user_id": "100"},
+            )
 
         assert response.status_code == 200
         assert "Неверный пароль" in response.text
@@ -131,11 +171,18 @@ class TestLoginEndpoint:
     def test_login_no_password_configured(self, mock_settings, client):
         """Shows error when WEB_PASSWORD not set."""
         mock_settings.web_password = ""
+        mock_settings.web_root_path = ""
+        mock_settings.env = "test"
 
-        response = client.post(
-            "/login",
-            data={"password": "any-password"},
-        )
+        users = [_make_user(100, "Иван")]
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            response = client.post(
+                "/login",
+                data={"password": "any-password", "user_id": "100"},
+            )
 
         assert response.status_code == 200
         assert "WEB_PASSWORD" in response.text
@@ -144,19 +191,26 @@ class TestLoginEndpoint:
     def test_rate_limiting(self, mock_settings, client):
         """Rate limits login attempts."""
         mock_settings.web_password = "correct-password"
+        mock_settings.web_root_path = ""
+        mock_settings.env = "test"
 
-        # Make 5 failed attempts
-        for _ in range(5):
-            client.post("/login", data={"password": "wrong"})
+        users = [_make_user(100, "Иван")]
+        with (
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+        ):
+            # Make 5 failed attempts
+            for _ in range(5):
+                client.post("/login", data={"password": "wrong", "user_id": "100"})
 
-        # 6th attempt should be rate limited
-        response = client.post("/login", data={"password": "wrong"})
+            # 6th attempt should be rate limited
+            response = client.post("/login", data={"password": "wrong", "user_id": "100"})
 
         assert "5 минут" in response.text
 
 
 class TestLogout:
-    """Tests for GET /costs/logout endpoint."""
+    """Tests for GET /logout endpoint."""
 
     def test_logout_clears_session(self, authenticated_client):
         """Logout clears session and redirects."""
@@ -393,7 +447,7 @@ class TestEditCostForm:
         mock_message = MagicMock()
         mock_message.id = 1
         mock_message.text = "Молоко 100"
-        mock_message.user_id = 123
+        mock_message.user_id = 100  # Match authenticated_client telegram_id
         mock_message.created_at = datetime.now()
 
         with patch("bot.web.costs.get_db_session") as mock_get_session:
@@ -435,7 +489,7 @@ class TestEditCost:
         mock_message = MagicMock()
         mock_message.id = 1
         mock_message.text = "Хлеб 50"
-        mock_message.user_id = 123
+        mock_message.user_id = 100
         mock_message.created_at = datetime.now()
 
         with patch("bot.web.costs.get_db_session") as mock_get_session:
@@ -451,7 +505,7 @@ class TestEditCost:
                         data={
                             "name": "Хлеб",
                             "amount": "50",
-                            "user_id": "123",
+                            "user_id": "100",
                             "csrf_token": csrf_token,
                         },
                         follow_redirects=False,
@@ -479,13 +533,20 @@ class TestDeleteCost:
         """Successfully deletes cost."""
         client, csrf_token = authenticated_client
 
+        mock_message = MagicMock()
+        mock_message.id = 1
+        mock_message.user_id = 100
+
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(
                 return_value=mock_db_session
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("bot.web.costs.delete_message_by_id", return_value=True):
+            with (
+                patch("bot.web.costs.get_message_by_id", return_value=mock_message),
+                patch("bot.web.costs.delete_message_by_id", return_value=True),
+            ):
                 response = client.post(
                     "/costs/1/delete",
                     data={"csrf_token": csrf_token},
@@ -505,7 +566,7 @@ class TestDeleteCost:
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch("bot.web.costs.delete_message_by_id", return_value=False):
+            with patch("bot.web.costs.get_message_by_id", return_value=None):
                 response = client.post(
                     "/costs/1/delete",
                     data={"csrf_token": csrf_token},
@@ -585,26 +646,34 @@ class TestDatabaseErrorHandling:
         """Edit endpoint handles database errors gracefully."""
         client, csrf_token = authenticated_client
 
+        mock_message = MagicMock()
+        mock_message.id = 1
+        mock_message.text = "Test 100"
+        mock_message.user_id = 100
+        mock_message.created_at = datetime.now()
+
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(
                 return_value=mock_db_session
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch(
-                "bot.web.costs.update_message",
-                side_effect=Exception("Database error"),
+            with (
+                patch("bot.web.costs.get_message_by_id", return_value=mock_message),
+                patch(
+                    "bot.web.costs.update_message",
+                    side_effect=Exception("Database error"),
+                ),
             ):
-                with patch("bot.web.costs.get_message_by_id", return_value=None):
-                    response = client.post(
-                        "/costs/1/edit",
-                        data={
-                            "name": "Test",
-                            "amount": "100",
-                            "user_id": "1",
-                            "csrf_token": csrf_token,
-                        },
-                    )
+                response = client.post(
+                    "/costs/1/edit",
+                    data={
+                        "name": "Test",
+                        "amount": "100",
+                        "user_id": "100",
+                        "csrf_token": csrf_token,
+                    },
+                )
 
         assert response.status_code == 200
         assert "Ошибка сохранения" in response.text
@@ -613,15 +682,22 @@ class TestDatabaseErrorHandling:
         """Delete endpoint handles database errors gracefully."""
         client, csrf_token = authenticated_client
 
+        mock_message = MagicMock()
+        mock_message.id = 1
+        mock_message.user_id = 100
+
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(
                 return_value=mock_db_session
             )
             mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
 
-            with patch(
-                "bot.web.costs.delete_message_by_id",
-                side_effect=Exception("Database error"),
+            with (
+                patch("bot.web.costs.get_message_by_id", return_value=mock_message),
+                patch(
+                    "bot.web.costs.delete_message_by_id",
+                    side_effect=Exception("Database error"),
+                ),
             ):
                 response = client.post(
                     "/costs/1/delete",
