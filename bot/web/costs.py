@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Any
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -28,7 +29,6 @@ from bot.utils import format_amount, pluralize
 from bot.web.auth import (
     get_csrf_token,
     get_current_user_name,
-    get_current_user_role,
     get_current_user_telegram_id,
     get_flash_message,
     is_admin,
@@ -492,7 +492,7 @@ async def edit_cost(
             set_flash_message(request, "Вы можете редактировать только свои расходы", "error")
             return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
         # Non-admins cannot change the user_id
-        user_id = existing_cost.user_id if existing_cost else current_user_id
+        user_id = existing_cost.user_id if existing_cost else current_user_id  # type: ignore[assignment]
 
     form_data = {
         "name": name,
@@ -607,7 +607,7 @@ async def bulk_delete(
         if not is_admin(request):
             current_user_id = get_current_user_telegram_id(request)
             all_messages = await get_all_messages(session)
-            messages_map = {m.id: m for m in all_messages}
+            messages_map: dict[Any, Any] = {m.id: m for m in all_messages}
             forbidden_ids = [
                 mid for mid in ids if mid in messages_map and messages_map[mid].user_id != current_user_id
             ]
@@ -664,7 +664,7 @@ async def bulk_change_date(
         if not is_admin(request):
             current_user_id = get_current_user_telegram_id(request)
             all_messages = await get_all_messages(session)
-            messages_map = {m.id: m for m in all_messages}
+            messages_map: dict[Any, Any] = {m.id: m for m in all_messages}
             forbidden_ids = [
                 mid for mid in ids if mid in messages_map and messages_map[mid].user_id != current_user_id
             ]

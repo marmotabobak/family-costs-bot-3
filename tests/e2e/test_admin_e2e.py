@@ -1200,7 +1200,7 @@ class TestNavigationAndHealth:
     async def test_non_admin_nav_hides_users_and_logs(self, db, costs_patches):
         """Non-admin user sees costs link but not users/logs in nav."""
         async with _client() as c:
-            csrf = await _login_as_user(c, db, 200, "Обычный")
+            await _login_as_user(c, db, 200, "Обычный")
             r = await c.get("/costs")
         assert "/costs" in r.text
         assert "/users" not in r.text
