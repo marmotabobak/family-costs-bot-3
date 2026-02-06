@@ -6,6 +6,7 @@ Create Date: 2026-02-06 00:00:00.000000
 
 """
 
+import os
 from typing import Sequence, Union
 
 from alembic import op
@@ -25,6 +26,18 @@ def upgrade() -> None:
         "users",
         sa.Column("role", sa.String(20), nullable=False, server_default="user"),
     )
+
+    admin_tid = os.environ.get("ADMIN_TELEGRAM_ID")
+    if admin_tid:
+        conn = op.get_bind()
+        conn.execute(
+            sa.text(
+                "INSERT INTO users (telegram_id, name, role) "
+                "VALUES (:tid, 'Admin', 'admin') "
+                "ON CONFLICT (telegram_id) DO UPDATE SET role = 'admin'"
+            ),
+            {"tid": int(admin_tid)},
+        )
 
 
 def downgrade() -> None:

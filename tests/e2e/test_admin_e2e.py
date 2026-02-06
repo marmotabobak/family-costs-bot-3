@@ -1492,3 +1492,226 @@ class TestRoleBasedAccessE2E:
         assert session["telegram_id"] == 100
         assert session["user_name"] == "Тестовый Админ"
         assert session["role"] == "admin"
+
+
+# ===========================================================================
+# 8. Bootstrap & User Lifecycle
+# ===========================================================================
+
+
+class TestBootstrapAndUserLifecycle:
+    """E2E: empty DB → admin bootstrap → admin creates user → user access."""
+
+    # --- Scenario 1: empty DB → admin seeded by migration → full access ---
+
+    @pytest.mark.asyncio
+    async def test_empty_db_login_page_has_no_users(self, db):
+        """Empty users table → login dropdown has no selectable users."""
+        db.users.clear()
+        async with _client() as c:
+            r = await c.get("/login")
+        assert r.status_code == 200
+        assert "Выберите" in r.text
+        assert "Тестовый Админ" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_migration_seeded_admin_appears_in_dropdown(self, db):
+        """Admin seeded by migration appears in login dropdown."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin")
+
+        async with _client() as c:
+            r = await c.get("/login")
+        assert "Seed Admin" in r.text
+
+    @pytest.mark.asyncio
+    async def test_migration_seeded_admin_can_login_with_full_access(self, db, users_patches, costs_patches):
+        """Admin seeded by migration can log in and access all panel sections."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin")
+
+        async with _client() as c:
+            await _login(c, telegram_id=555)
+            token = c.cookies[SESSION_COOKIE]
+            assert auth_sessions[token]["role"] == "admin"
+
+            r = await c.get("/costs")
+            assert r.status_code == 200
+
+            r = await c.get("/users")
+            assert r.status_code == 200
+
+            r = await c.get("/logs")
+            assert r.status_code == 200
+
+    # --- Scenario 2: admin creates user → user has web + bot access ---
+
+    @pytest.mark.asyncio
+    async def test_admin_creates_user_appears_in_dropdown(self, db, users_patches):
+        """After admin creates a user, that user appears in login dropdown."""
+        async with _client() as c:
+            csrf = await _login(c)
+            r = await c.post(
+                "/users/add",
+                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+        async with _client() as c:
+            r = await c.get("/login")
+        assert "Мария" in r.text
+
+    @pytest.mark.asyncio
+    async def test_created_user_can_login_and_access_web(self, db, users_patches, costs_patches):
+        """User created by admin can log in with role=user and access /costs."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Обычный", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        async with _client() as c:
+            await _login(c, telegram_id=200)
+            token = c.cookies[SESSION_COOKIE]
+            session = auth_sessions[token]
+            assert session["role"] == "user"
+            assert session["user_name"] == "Обычный"
+            assert session["telegram_id"] == 200
+
+            r = await c.get("/costs")
+            assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_created_user_allowed_by_bot_middleware(self, db, users_patches):
+        """User created by admin passes bot's AllowedUsersMiddleware."""
+        from aiogram.types import Message
+        from aiogram.types import User as TgUser
+
+        from bot.middleware import AllowedUsersMiddleware
+
+        # Admin creates user via web panel
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Бот-юзер", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        # Verify user's telegram_id is in the DB
+        all_tids = [u.telegram_id for u in db.users.values()]
+        assert 200 in all_tids
+
+        # Simulate bot message from the new user
+        middleware = AllowedUsersMiddleware()
+        handler = AsyncMock(return_value="ok")
+
+        tg_user = MagicMock(spec=TgUser)
+        tg_user.id = 200
+        tg_user.username = "bot_user"
+
+        message = MagicMock(spec=Message)
+        message.from_user = tg_user
+        message.answer = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_ctx():
+            yield AsyncMock()
+
+        with (
+            patch("bot.middleware.get_db_session", return_value=mock_ctx()),
+            patch(
+                "bot.middleware.get_all_telegram_ids",
+                new=AsyncMock(return_value=all_tids),
+            ),
+        ):
+            result = await middleware(handler, message, {})
+
+        handler.assert_called_once_with(message, {})
+        assert result == "ok"
+        message.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_created_user_adds_cost_via_web(self, db, users_patches, costs_patches):
+        """User created by admin can add a cost via web panel POST /costs/add."""
+        # Admin creates user
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        # User logs in and adds a cost
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=200)
+
+            r = await c.post(
+                "/costs/add",
+                data={
+                    "name": "Молоко",
+                    "amount": "99.50",
+                    "user_id": "200",
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # Cost appears in the list
+            r = await c.get("/costs")
+            assert r.status_code == 200
+            assert "Молоко" in r.text
+
+    @pytest.mark.asyncio
+    async def test_created_user_adds_cost_via_telegram(self, db, users_patches):
+        """User created by admin can add a cost via telegram bot message."""
+        from bot.routers.messages import handle_message
+
+        # Admin creates user
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        # Simulate telegram message from created user
+        message = AsyncMock()
+        message.text = "Кофе 150"
+        message.from_user = MagicMock()
+        message.from_user.id = 200
+        message.answer = AsyncMock()
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={})
+        state.set_state = AsyncMock()
+        state.update_data = AsyncMock()
+        state.clear = AsyncMock()
+
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch(
+                "bot.routers.messages.save_message",
+                new=AsyncMock(side_effect=db.save_message),
+            ),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = AsyncMock()
+            await handle_message(message, state)
+
+        # Bot responded with success
+        message.answer.assert_called_once()
+        answer_text = message.answer.call_args[0][0]
+        assert "Записано 1 расход" in answer_text
+        assert "Кофе: 150" in answer_text
+
+        # Cost saved in DB
+        assert len(db.messages) == 1
+        saved = list(db.messages.values())[0]
+        assert saved.user_id == 200
+        assert "Кофе" in saved.text
