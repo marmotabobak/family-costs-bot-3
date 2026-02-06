@@ -185,6 +185,74 @@ class TestLoginPost:
         assert "Слишком много попыток" in response.text
 
 
+    @pytest.mark.asyncio
+    async def test_login_auto_promotes_admin_telegram_id(self):
+        """User matching ADMIN_TELEGRAM_ID is auto-promoted to admin."""
+        user = _make_user(1, 555, "Будущий Админ", "user")
+        users = [user]
+
+        mock_session = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_db():
+            yield mock_session
+
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=mock_db),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+        ):
+            mock_settings.web_password = "secret"
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+            mock_settings.admin_telegram_id = 555
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/login", data={"password": "secret", "user_id": "555"}, follow_redirects=False
+                )
+
+        assert response.status_code == 303
+        # User role was updated
+        assert user.role == "admin"
+        mock_session.commit.assert_called_once()
+
+        # Session stores admin role
+        session_token = response.cookies[SESSION_COOKIE]
+        assert auth_sessions[session_token]["role"] == "admin"
+        auth_sessions.pop(session_token, None)
+
+    @pytest.mark.asyncio
+    async def test_login_no_promotion_without_admin_telegram_id(self):
+        """Without ADMIN_TELEGRAM_ID, no auto-promotion happens."""
+        user = _make_user(1, 123, "Иван", "user")
+        users = [user]
+
+        with (
+            patch("bot.web.auth.settings") as mock_settings,
+            patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
+        ):
+            mock_settings.web_password = "secret"
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+            mock_settings.admin_telegram_id = None
+
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/login", data={"password": "secret", "user_id": "123"}, follow_redirects=False
+                )
+
+        assert response.status_code == 303
+        assert user.role == "user"
+
+        session_token = response.cookies[SESSION_COOKIE]
+        assert auth_sessions[session_token]["role"] == "user"
+        auth_sessions.pop(session_token, None)
+
+
 class TestLogout:
     """Tests for GET /logout."""
 

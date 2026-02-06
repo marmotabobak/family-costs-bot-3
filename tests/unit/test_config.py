@@ -71,68 +71,42 @@ class TestSettingsValidation:
         assert settings.database_url == "postgresql://user:pass@localhost/db"
 
 
-class TestAllowedUserIdsValidation:
-    """Тесты валидации allowed_user_ids."""
+class TestAdminTelegramId:
+    """Тесты настройки admin_telegram_id."""
 
-    def test_allowed_user_ids_default_empty(self, monkeypatch):
-        """По умолчанию список разрешённых пользователей пуст."""
+    def test_admin_telegram_id_default_none(self):
+        """По умолчанию admin_telegram_id не задан."""
 
         class SettingsWithNoEnv(Settings):
-            model_config = SettingsConfigDict(
-                env_file=None,
-            )
+            model_config = SettingsConfigDict(env_file=None)
 
         settings = SettingsWithNoEnv(
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
         )
+        assert settings.admin_telegram_id is None
 
-        assert settings.allowed_user_ids == []
-
-    def test_allowed_user_ids_from_list(self):
-        """Список пользователей из списка."""
+    def test_admin_telegram_id_from_value(self):
+        """admin_telegram_id принимается явно."""
         settings = Settings(
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
-            allowed_user_ids=[123, 456, 789],
+            admin_telegram_id=123456789,
         )
-        assert settings.allowed_user_ids == [123, 456, 789]
+        assert settings.admin_telegram_id == 123456789
 
-    def test_allowed_user_ids_from_comma_separated_string(self):
-        """Список пользователей из строки с разделителем-запятой."""
-        settings = Settings(
+    def test_admin_telegram_id_from_env(self, monkeypatch):
+        """admin_telegram_id читается из переменной окружения."""
+
+        class SettingsWithNoEnv(Settings):
+            model_config = SettingsConfigDict(env_file=None)
+
+        monkeypatch.setenv("ADMIN_TELEGRAM_ID", "987654321")
+        settings = SettingsWithNoEnv(
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
-            allowed_user_ids="123,456,789",
         )
-        assert settings.allowed_user_ids == [123, 456, 789]
-
-    def test_allowed_user_ids_from_string_with_spaces(self):
-        """Список пользователей из строки с пробелами."""
-        settings = Settings(
-            bot_token="123456789:ABCdefGHIjkl",
-            database_url="postgresql://user:pass@localhost/db",
-            allowed_user_ids="123, 456,  789",
-        )
-        assert settings.allowed_user_ids == [123, 456, 789]
-
-    def test_allowed_user_ids_empty_string(self):
-        """Пустая строка даёт пустой список."""
-        settings = Settings(
-            bot_token="123456789:ABCdefGHIjkl",
-            database_url="postgresql://user:pass@localhost/db",
-            allowed_user_ids="",
-        )
-        assert settings.allowed_user_ids == []
-
-    def test_allowed_user_ids_single_value(self):
-        """Одно значение в строке."""
-        settings = Settings(
-            bot_token="123456789:ABCdefGHIjkl",
-            database_url="postgresql://user:pass@localhost/db",
-            allowed_user_ids="123456789",
-        )
-        assert settings.allowed_user_ids == [123456789]
+        assert settings.admin_telegram_id == 987654321
 
 
 class TestWebSettings:

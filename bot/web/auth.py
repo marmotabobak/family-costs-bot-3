@@ -259,12 +259,22 @@ async def login(request: Request, password: str = Form(...), user_id: str = Form
     async with get_db_session() as session:
         user = await get_user_by_telegram_id(session, telegram_id)
 
-    if not user:
-        return templates.TemplateResponse(
-            request,
-            "costs/login.html",
-            {"error": "Пользователь не найден", "authenticated": False, "users": users},
-        )
+        if not user:
+            return templates.TemplateResponse(
+                request,
+                "costs/login.html",
+                {"error": "Пользователь не найден", "authenticated": False, "users": users},
+            )
+
+        # Auto-promote to admin if telegram_id matches ADMIN_TELEGRAM_ID
+        if (
+            settings.admin_telegram_id
+            and user.telegram_id == settings.admin_telegram_id
+            and user.role != "admin"
+        ):
+            user.role = "admin"  # type: ignore[assignment]
+            await session.commit()
+            logger.info("Auto-promoted user %s to admin (ADMIN_TELEGRAM_ID match)", user.name)
 
     # Create session with user info
     token = generate_session_token()
