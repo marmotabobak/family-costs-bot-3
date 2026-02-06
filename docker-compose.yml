@@ -26,7 +26,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       ENV: ${ENV:-prod}
       WEB_BASE_URL: ${WEB_BASE_URL:-http://localhost:8000}
-      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS:-}
+      ADMIN_TELEGRAM_ID: ${ADMIN_TELEGRAM_ID:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -42,6 +42,7 @@ services:
       ENV: ${ENV:-prod}
       WEB_PASSWORD: ${WEB_PASSWORD:-}
       WEB_ROOT_PATH: ${WEB_ROOT_PATH:-}
+      ADMIN_TELEGRAM_ID: ${ADMIN_TELEGRAM_ID:-}
     ports:
       - "${WEB_PORT:-8000}:8000"
     depends_on:

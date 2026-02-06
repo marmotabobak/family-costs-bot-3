@@ -12,6 +12,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from bot.config import Environment, settings
+from bot.db.dependencies import get_session as get_db_session
+from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +82,35 @@ def is_authenticated(request: Request) -> bool:
     """Check if user is authenticated."""
     session = get_session_from_cookie(request)
     return session is not None and session.get("authenticated", False)
+
+
+def get_current_user_telegram_id(request: Request) -> int | None:
+    """Get current user's telegram_id from session."""
+    session = get_session_from_cookie(request)
+    if session:
+        return session.get("telegram_id")
+    return None
+
+
+def get_current_user_role(request: Request) -> str | None:
+    """Get current user's role from session."""
+    session = get_session_from_cookie(request)
+    if session:
+        return session.get("role")
+    return None
+
+
+def get_current_user_name(request: Request) -> str | None:
+    """Get current user's name from session."""
+    session = get_session_from_cookie(request)
+    if session:
+        return session.get("user_name")
+    return None
+
+
+def is_admin(request: Request) -> bool:
+    """Check if current user is admin."""
+    return get_current_user_role(request) == "admin"
 
 
 def get_csrf_token(request: Request) -> str | None:
@@ -154,15 +185,23 @@ async def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
+    # Fetch users for dropdown
+    async with get_db_session() as session:
+        users = await get_all_users(session)
+
     return templates.TemplateResponse(
-        request, "costs/login.html", {"authenticated": False}
+        request, "costs/login.html", {"authenticated": False, "users": users}
     )
 
 
 @router.post("/login")
-async def login(request: Request, password: str = Form(...)):
+async def login(request: Request, password: str = Form(...), user_id: str = Form(...)):
     """Handle login form submission."""
     client_ip = request.client.host if request.client else "unknown"
+
+    # Fetch users for error responses
+    async with get_db_session() as session:
+        users = await get_all_users(session)
 
     if not check_rate_limit(client_ip):
         logger.warning("Rate limit exceeded for IP: %s", client_ip)
@@ -172,6 +211,7 @@ async def login(request: Request, password: str = Form(...)):
             {
                 "error": "Слишком много попыток входа. Повторите через 5 минут.",
                 "authenticated": False,
+                "users": users,
             },
         )
 
@@ -182,6 +222,7 @@ async def login(request: Request, password: str = Form(...)):
             {
                 "error": "Пароль не настроен. Установите WEB_PASSWORD в переменных окружения.",
                 "authenticated": False,
+                "users": users,
             },
         )
 
@@ -194,16 +235,57 @@ async def login(request: Request, password: str = Form(...)):
         return templates.TemplateResponse(
             request,
             "costs/login.html",
-            {"error": "Неверный пароль", "authenticated": False},
+            {"error": "Неверный пароль", "authenticated": False, "users": users},
         )
 
-    # Create session with CSRF token
+    # Validate user selection
+    if not user_id:
+        return templates.TemplateResponse(
+            request,
+            "costs/login.html",
+            {"error": "Выберите пользователя", "authenticated": False, "users": users},
+        )
+
+    try:
+        telegram_id = int(user_id)
+    except ValueError:
+        return templates.TemplateResponse(
+            request,
+            "costs/login.html",
+            {"error": "Некорректный пользователь", "authenticated": False, "users": users},
+        )
+
+    # Get user from DB
+    async with get_db_session() as session:
+        user = await get_user_by_telegram_id(session, telegram_id)
+
+        if not user:
+            return templates.TemplateResponse(
+                request,
+                "costs/login.html",
+                {"error": "Пользователь не найден", "authenticated": False, "users": users},
+            )
+
+        # Auto-promote to admin if telegram_id matches ADMIN_TELEGRAM_ID
+        if (
+            settings.admin_telegram_id
+            and user.telegram_id == settings.admin_telegram_id
+            and user.role != "admin"
+        ):
+            user.role = "admin"  # type: ignore[assignment]
+            await session.commit()
+            logger.info("Auto-promoted user %s to admin (ADMIN_TELEGRAM_ID match)", user.name)
+
+    # Create session with user info
     token = generate_session_token()
     csrf_token = generate_csrf_token()
     auth_sessions[token] = {
         "authenticated": True,
         "created_at": datetime.now(),
         "csrf_token": csrf_token,
+        "telegram_id": user.telegram_id,
+        "user_name": user.name,
+        "role": user.role,
     }
 
     response = RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
@@ -215,7 +297,7 @@ async def login(request: Request, password: str = Form(...)):
         max_age=SESSION_LIFETIME,
         secure=settings.env == Environment.prod,
     )
-    logger.info("User logged in to admin panel")
+    logger.info("User %s (role=%s) logged in to admin panel", user.name, user.role)
     return response
 
 

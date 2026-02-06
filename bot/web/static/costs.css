@@ -22,6 +22,12 @@
     color: #e74c3c;
 }
 
+.nav-links .user-info {
+    color: #666;
+    font-weight: normal;
+    font-style: italic;
+}
+
 /* Card header with title and button */
 .card-header {
     display: flex;

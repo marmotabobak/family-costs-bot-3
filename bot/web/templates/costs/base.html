@@ -14,8 +14,11 @@
             {% if authenticated %}
             <nav class="nav-links">
                 <a href="{{ root_path }}/costs">Расходы</a>
+                {% if is_admin %}
                 <a href="{{ root_path }}/users">Пользователи</a>
                 <a href="{{ root_path }}/logs">Логи</a>
+                {% endif %}
+                <span class="user-info">{{ user_name }}{% if is_admin %} (админ){% endif %}</span>
                 <a href="{{ root_path }}/logout" class="logout-link">Выход</a>
             </nav>
             {% endif %}

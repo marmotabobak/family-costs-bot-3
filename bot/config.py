@@ -1,8 +1,6 @@
 from enum import Enum
 
-from typing import Any
-
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -16,23 +14,10 @@ class Settings(BaseSettings):
     bot_token: str
     database_url: str
     env: Environment = Environment.prod
-    allowed_user_ids: list[int] | str = Field(default_factory=list)
+    admin_telegram_id: int | None = None
     web_base_url: str = "http://localhost:8000"
     web_password: str = ""
     web_root_path: str = ""
-
-    @field_validator("allowed_user_ids", mode="before")
-    @classmethod
-    def parse_allowed_user_ids(cls, v: Any) -> list[int]:
-        """Парсинг списка разрешённых telegram user_id из строки или списка."""
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return v
-        if not v or not v.strip():
-            return []
-        # Парсим строку вида "123,456,789" или "123, 456, 789"
-        return [int(uid.strip()) for uid in v.split(",") if uid.strip()]
 
     @field_validator("bot_token")
     @classmethod

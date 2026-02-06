@@ -42,11 +42,12 @@ class FakeDB:
 
     # --- user repo ---
 
-    def _make_user(self, uid, tid, name):
+    def _make_user(self, uid, tid, name, role="user"):
         u = MagicMock()
         u.id = uid
         u.telegram_id = tid
         u.name = name
+        u.role = role
         u.created_at = MagicMock()
         u.created_at.strftime = MagicMock(return_value="01.01.2026 12:00")
         return u
@@ -57,6 +58,12 @@ class FakeDB:
     async def get_user_by_id(self, session, user_id):
         return self.users.get(user_id)
 
+    async def get_user_by_telegram_id(self, session, telegram_id):
+        for u in self.users.values():
+            if u.telegram_id == telegram_id:
+                return u
+        return None
+
     async def create_user(self, session, telegram_id, name):
         for u in self.users.values():
             if u.telegram_id == telegram_id:
@@ -66,12 +73,14 @@ class FakeDB:
         self.users[uid] = self._make_user(uid, telegram_id, name)
         return self.users[uid]
 
-    async def update_user(self, session, user_id, telegram_id, name):
+    async def update_user(self, session, user_id, telegram_id, name, role=None):
         u = self.users.get(user_id)
         if not u:
             return None
         u.telegram_id = telegram_id
         u.name = name
+        if role is not None:
+            u.role = role
         return u
 
     async def delete_user(self, session, user_id):
@@ -193,7 +202,22 @@ def _cleanup_global_state():
 
 @pytest.fixture
 def db():
-    return FakeDB()
+    fake = FakeDB()
+    # Pre-seed default admin user for login
+    fake.users[1] = fake._make_user(1, 100, "Тестовый Админ", role="admin")
+    fake._next_uid = 2
+    return fake
+
+
+@pytest.fixture(autouse=True)
+def auth_patches(db):
+    """Patch auth module's DB calls so login can fetch users."""
+    with (
+        patch("bot.web.auth.get_db_session", side_effect=_fake_session),
+        patch("bot.web.auth.get_all_users", new=AsyncMock(side_effect=db.get_all_users)),
+        patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(side_effect=db.get_user_by_telegram_id)),
+    ):
+        yield
 
 
 @pytest.fixture
@@ -233,12 +257,34 @@ def _client():
     return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
-async def _login(client: AsyncClient) -> str:
-    """POST /login and return the CSRF token from the created session."""
-    resp = await client.post("/login", data={"password": _PASS}, follow_redirects=False)
+async def _login(client: AsyncClient, telegram_id: int = 100) -> str:
+    """POST /login as a specific user and return the CSRF token.
+
+    Default telegram_id=100 corresponds to the pre-seeded admin user.
+    """
+    resp = await client.post(
+        "/login",
+        data={"password": _PASS, "user_id": str(telegram_id)},
+        follow_redirects=False,
+    )
     assert resp.status_code == 303, f"Login failed: {resp.text}"
     token = client.cookies[SESSION_COOKIE]
     return auth_sessions[token]["csrf_token"]
+
+
+async def _login_as_user(client: AsyncClient, db: FakeDB, telegram_id: int, name: str) -> str:
+    """Create a regular user in FakeDB and log in as them. Returns CSRF token."""
+    # Check if user already exists
+    existing = None
+    for u in db.users.values():
+        if u.telegram_id == telegram_id:
+            existing = u
+            break
+    if not existing:
+        uid = db._next_uid
+        db._next_uid += 1
+        db.users[uid] = db._make_user(uid, telegram_id, name, role="user")
+    return await _login(client, telegram_id)
 
 
 # ===========================================================================
@@ -285,7 +331,7 @@ class TestAuthJourney:
     async def test_wrong_then_correct_password(self):
         """A wrong password attempt does not prevent a correct one."""
         async with _client() as c:
-            r = await c.post("/login", data={"password": "nope"})
+            r = await c.post("/login", data={"password": "nope", "user_id": "100"})
             assert "Неверный пароль" in r.text
             # Correct password still works
             await _login(c)
@@ -299,8 +345,8 @@ class TestAuthJourney:
 
         async with _client() as c:
             for _ in range(MAX_LOGIN_ATTEMPTS):
-                await c.post("/login", data={"password": "bad"})
-            r = await c.post("/login", data={"password": "bad"})
+                await c.post("/login", data={"password": "bad", "user_id": "100"})
+            r = await c.post("/login", data={"password": "bad", "user_id": "100"})
         assert "Слишком много попыток" in r.text
 
     @pytest.mark.asyncio
@@ -333,10 +379,6 @@ class TestUsersCRUDJourney:
         async with _client() as c:
             csrf = await _login(c)
 
-            # List starts empty
-            r = await c.get("/users")
-            assert "Пользователей нет" in r.text
-
             # Add user
             r = await c.post(
                 "/users/add",
@@ -355,10 +397,11 @@ class TestUsersCRUDJourney:
         """Pre-seed a user, edit it, verify changes in list."""
         async with _client() as c:
             csrf = await _login(c)
-            await db.create_user(None, 100, "Старый")
+            await db.create_user(None, 300, "Старый")
+            uid = max(db.users.keys())  # Get the id of newly created user
 
             r = await c.post(
-                "/users/1/edit",
+                f"/users/{uid}/edit",
                 data={"name": "Новый", "telegram_id": "200", "csrf_token": csrf},
                 follow_redirects=False,
             )
@@ -370,20 +413,21 @@ class TestUsersCRUDJourney:
 
     @pytest.mark.asyncio
     async def test_delete_user_removes_from_list(self, users_patches, db):
-        """Pre-seed a user, delete it, list shows empty state."""
+        """Pre-seed a user, delete it, verify it's gone from list."""
         async with _client() as c:
             csrf = await _login(c)
-            await db.create_user(None, 100, "Удалимый")
+            await db.create_user(None, 300, "Удалимый")
+            uid = max(db.users.keys())
 
             r = await c.post(
-                "/users/1/delete",
+                f"/users/{uid}/delete",
                 data={"csrf_token": csrf},
                 follow_redirects=False,
             )
             assert r.status_code == 303
 
             r = await c.get("/users")
-        assert "Пользователей нет" in r.text
+        assert "Удалимый" not in r.text
 
     @pytest.mark.asyncio
     async def test_validation_empty_name(self, users_patches, db):
@@ -442,11 +486,12 @@ class TestUsersCRUDJourney:
         """Edit with empty name re-renders form with error."""
         async with _client() as c:
             csrf = await _login(c)
-            await db.create_user(None, 100, "Иван")
+            await db.create_user(None, 300, "Иван")
+            uid = max(db.users.keys())
 
             r = await c.post(
-                "/users/1/edit",
-                data={"name": "  ", "telegram_id": "100", "csrf_token": csrf},
+                f"/users/{uid}/edit",
+                data={"name": "  ", "telegram_id": "300", "csrf_token": csrf},
             )
         assert r.status_code == 200
         assert "Имя не может быть пустым" in r.text
@@ -1150,3 +1195,576 @@ class TestNavigationAndHealth:
             r = await c.get("/login", follow_redirects=False)
         assert r.status_code == 303
         assert "/costs" in r.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_nav_hides_users_and_logs(self, db, costs_patches):
+        """Non-admin user sees costs link but not users/logs in nav."""
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/costs")
+        assert "/costs" in r.text
+        assert "/users" not in r.text
+        assert "/logs" not in r.text
+        assert "/logout" in r.text
+
+
+# ===========================================================================
+# 7. Role-Based Access
+# ===========================================================================
+
+
+class TestRoleBasedAccessE2E:
+    """E2E tests for admin vs user role permissions."""
+
+    @pytest.mark.asyncio
+    async def test_non_admin_redirected_from_users(self, db):
+        """Non-admin accessing /users gets redirected to /costs."""
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/users", follow_redirects=False)
+        assert r.status_code == 303
+        assert "/costs" in r.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_redirected_from_logs(self, db):
+        """Non-admin accessing /logs gets redirected to /costs."""
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/logs", follow_redirects=False)
+        assert r.status_code == 303
+        assert "/costs" in r.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_can_see_all_costs(self, db, costs_patches):
+        """Non-admin can see all costs including other users'."""
+        await db.save_message(None, user_id=100, text="Админский 50")
+        await db.save_message(None, user_id=200, text="Пользовательский 75")
+
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/costs")
+        assert r.status_code == 200
+        assert "Админский" in r.text
+        assert "Пользовательский" in r.text
+
+    @pytest.mark.asyncio
+    async def test_non_admin_can_edit_own_cost(self, db, costs_patches):
+        """Non-admin can edit their own cost."""
+        await db.save_message(None, user_id=200, text="Своё 50")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+
+            r = await c.get("/costs/1/edit")
+            assert r.status_code == 200
+
+            r = await c.post(
+                "/costs/1/edit",
+                data={
+                    "name": "Обновлённое",
+                    "amount": "75",
+                    "user_id": "200",
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_non_admin_cannot_edit_others_cost(self, db, costs_patches):
+        """Non-admin is rejected when trying to edit another user's cost."""
+        await db.save_message(None, user_id=100, text="Чужое 50")
+
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/costs/1/edit", follow_redirects=False)
+        assert r.status_code == 303
+        assert "/costs" in r.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_non_admin_can_delete_own_cost(self, db, costs_patches):
+        """Non-admin can delete their own cost."""
+        await db.save_message(None, user_id=200, text="Своё 50")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/1/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            r = await c.get("/costs")
+        assert "Своё" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_non_admin_cannot_delete_others_cost(self, db, costs_patches):
+        """Non-admin is rejected when trying to delete another user's cost."""
+        await db.save_message(None, user_id=100, text="Чужое 50")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/1/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # Cost still exists
+            r = await c.get("/costs")
+        assert "Чужое" in r.text
+
+    @pytest.mark.asyncio
+    async def test_non_admin_bulk_delete_own_costs_ok(self, db, costs_patches):
+        """Non-admin can bulk delete their own costs."""
+        await db.save_message(None, user_id=200, text="Своё1 10")
+        await db.save_message(None, user_id=200, text="Своё2 20")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/bulk-delete",
+                data={"ids": ["1", "2"], "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_non_admin_bulk_delete_others_costs_rejected(self, db, costs_patches):
+        """Non-admin cannot bulk delete when selection includes others' costs."""
+        await db.save_message(None, user_id=200, text="Своё 10")
+        await db.save_message(None, user_id=100, text="Чужое 20")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/bulk-delete",
+                data={"ids": ["1", "2"], "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # Both costs should still exist
+            r = await c.get("/costs")
+        assert "Своё" in r.text
+        assert "Чужое" in r.text
+
+    @pytest.mark.asyncio
+    async def test_non_admin_bulk_change_date_own_ok(self, db, costs_patches):
+        """Non-admin can bulk change date for own costs."""
+        await db.save_message(None, user_id=200, text="Своё 10")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/bulk-change-date",
+                data={"ids": ["1"], "new_date": "2026-06-01", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_non_admin_bulk_change_date_others_rejected(self, db, costs_patches):
+        """Non-admin cannot bulk change date when selection includes others' costs."""
+        await db.save_message(None, user_id=100, text="Чужое 50")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/bulk-change-date",
+                data={"ids": ["1"], "new_date": "2026-06-01", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_non_admin_cannot_bulk_change_user(self, db, costs_patches):
+        """Non-admin is rejected from bulk change user."""
+        await db.save_message(None, user_id=200, text="Своё 10")
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, 200, "Обычный")
+            r = await c.post(
+                "/costs/bulk-change-user",
+                data={"ids": ["1"], "new_user_id": "100", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+        # user_id should remain unchanged
+        assert db.messages[1].user_id == 200
+
+    @pytest.mark.asyncio
+    async def test_admin_can_edit_any_cost(self, db, costs_patches):
+        """Admin can edit any user's cost."""
+        await db.save_message(None, user_id=200, text="Чужое 50")
+
+        async with _client() as c:
+            csrf = await _login(c)  # admin
+            r = await c.post(
+                "/costs/1/edit",
+                data={
+                    "name": "Обновлённое",
+                    "amount": "75",
+                    "user_id": "200",
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+
+    @pytest.mark.asyncio
+    async def test_admin_can_delete_any_cost(self, db, costs_patches):
+        """Admin can delete any user's cost."""
+        await db.save_message(None, user_id=200, text="Чужое 50")
+
+        async with _client() as c:
+            csrf = await _login(c)  # admin
+            r = await c.post(
+                "/costs/1/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+        assert 1 not in db.messages
+
+    @pytest.mark.asyncio
+    async def test_admin_can_bulk_change_user(self, db, costs_patches):
+        """Admin can bulk change user for any costs."""
+        await db.save_message(None, user_id=200, text="Тест 50")
+
+        async with _client() as c:
+            csrf = await _login(c)  # admin
+            r = await c.post(
+                "/costs/bulk-change-user",
+                data={"ids": ["1"], "new_user_id": "100", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+        assert r.status_code == 303
+        assert db.messages[1].user_id == 100
+
+    @pytest.mark.asyncio
+    async def test_non_admin_list_hides_edit_delete_for_others(self, db, costs_patches):
+        """Non-admin's costs list hides edit/delete buttons for other users' costs."""
+        await db.save_message(None, user_id=200, text="Своё 10")
+        await db.save_message(None, user_id=100, text="Чужое 20")
+
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/costs")
+
+        # Own cost should have edit button
+        assert "/costs/1/edit" in r.text
+        # Other user's cost should NOT have edit button
+        assert "/costs/2/edit" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_non_admin_list_hides_bulk_change_user(self, db, costs_patches):
+        """Non-admin's costs list does not show bulk change user form."""
+        await db.save_message(None, user_id=200, text="Своё 10")
+
+        async with _client() as c:
+            await _login_as_user(c, db, 200, "Обычный")
+            r = await c.get("/costs")
+        # The form action URL should not be present for non-admins
+        assert "/costs/bulk-change-user" not in r.text
+        assert "Изменить польз." not in r.text
+
+    @pytest.mark.asyncio
+    async def test_admin_list_shows_bulk_change_user(self, db, costs_patches):
+        """Admin's costs list shows bulk change user form."""
+        await db.save_message(None, user_id=100, text="Тест 10")
+
+        async with _client() as c:
+            await _login(c)  # admin
+            r = await c.get("/costs")
+        assert "/costs/bulk-change-user" in r.text
+        assert "Изменить польз." in r.text
+
+    @pytest.mark.asyncio
+    async def test_login_stores_user_info_in_session(self, db):
+        """Login correctly stores telegram_id, user_name, and role in session."""
+        async with _client() as c:
+            await _login(c, telegram_id=100)
+            token = c.cookies[SESSION_COOKIE]
+        session = auth_sessions[token]
+        assert session["telegram_id"] == 100
+        assert session["user_name"] == "Тестовый Админ"
+        assert session["role"] == "admin"
+
+
+# ===========================================================================
+# 8. Bootstrap & User Lifecycle
+# ===========================================================================
+
+
+class TestBootstrapAndUserLifecycle:
+    """E2E: empty DB → admin bootstrap → admin creates user → user access."""
+
+    # --- Scenario 1: empty DB → admin seeded by migration → full access ---
+
+    @pytest.mark.asyncio
+    async def test_empty_db_login_page_has_no_users(self, db):
+        """Empty users table → login dropdown has no selectable users."""
+        db.users.clear()
+        async with _client() as c:
+            r = await c.get("/login")
+        assert r.status_code == 200
+        assert "Выберите" in r.text
+        assert "Тестовый Админ" not in r.text
+
+    @pytest.mark.asyncio
+    async def test_migration_seeded_admin_appears_in_dropdown(self, db):
+        """Admin seeded by migration appears in login dropdown."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin")
+
+        async with _client() as c:
+            r = await c.get("/login")
+        assert "Seed Admin" in r.text
+
+    @pytest.mark.asyncio
+    async def test_migration_seeded_admin_can_login_with_full_access(self, db, users_patches, costs_patches):
+        """Admin seeded by migration can log in and access all panel sections."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin")
+
+        async with _client() as c:
+            await _login(c, telegram_id=555)
+            token = c.cookies[SESSION_COOKIE]
+            assert auth_sessions[token]["role"] == "admin"
+
+            r = await c.get("/costs")
+            assert r.status_code == 200
+
+            r = await c.get("/users")
+            assert r.status_code == 200
+
+            r = await c.get("/logs")
+            assert r.status_code == 200
+
+    # --- Scenario 2: admin creates user → user has web + bot access ---
+
+    @pytest.mark.asyncio
+    async def test_admin_creates_user_appears_in_dropdown(self, db, users_patches):
+        """After admin creates a user, that user appears in login dropdown."""
+        async with _client() as c:
+            csrf = await _login(c)
+            r = await c.post(
+                "/users/add",
+                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+        async with _client() as c:
+            r = await c.get("/login")
+        assert "Мария" in r.text
+
+    @pytest.mark.asyncio
+    async def test_created_user_can_login_and_access_web(self, db, users_patches, costs_patches):
+        """User created by admin can log in with role=user and access /costs."""
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Обычный", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        async with _client() as c:
+            await _login(c, telegram_id=200)
+            token = c.cookies[SESSION_COOKIE]
+            session = auth_sessions[token]
+            assert session["role"] == "user"
+            assert session["user_name"] == "Обычный"
+            assert session["telegram_id"] == 200
+
+            r = await c.get("/costs")
+            assert r.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_created_user_allowed_by_bot_middleware(self, db, users_patches):
+        """User created by admin passes bot's AllowedUsersMiddleware."""
+        from aiogram.types import Message
+        from aiogram.types import User as TgUser
+
+        from bot.middleware import AllowedUsersMiddleware
+
+        # Admin creates user via web panel
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Бот-юзер", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        # Verify user's telegram_id is in the DB
+        all_tids = [u.telegram_id for u in db.users.values()]
+        assert 200 in all_tids
+
+        # Simulate bot message from the new user
+        middleware = AllowedUsersMiddleware()
+        handler = AsyncMock(return_value="ok")
+
+        tg_user = MagicMock(spec=TgUser)
+        tg_user.id = 200
+        tg_user.username = "bot_user"
+
+        message = MagicMock(spec=Message)
+        message.from_user = tg_user
+        message.answer = AsyncMock()
+
+        @asynccontextmanager
+        async def mock_ctx():
+            yield AsyncMock()
+
+        with (
+            patch("bot.middleware.get_db_session", return_value=mock_ctx()),
+            patch(
+                "bot.middleware.get_all_telegram_ids",
+                new=AsyncMock(return_value=all_tids),
+            ),
+        ):
+            result = await middleware(handler, message, {})
+
+        handler.assert_called_once_with(message, {})
+        assert result == "ok"
+        message.answer.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_created_user_adds_cost_via_web(self, db, users_patches, costs_patches):
+        """User created by admin can add a cost via web panel POST /costs/add."""
+        # Admin creates user
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        # User logs in and adds a cost
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=200)
+
+            r = await c.post(
+                "/costs/add",
+                data={
+                    "name": "Молоко",
+                    "amount": "99.50",
+                    "user_id": "200",
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # Cost appears in the list
+            r = await c.get("/costs")
+            assert r.status_code == 200
+            assert "Молоко" in r.text
+
+    @pytest.mark.asyncio
+    async def test_created_user_adds_cost_via_telegram(self, db, users_patches):
+        """User created by admin can add a cost via telegram bot message."""
+        from bot.routers.messages import handle_message
+
+        # Admin creates user
+        async with _client() as c:
+            csrf = await _login(c)
+            await c.post(
+                "/users/add",
+                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                follow_redirects=False,
+            )
+
+        # Simulate telegram message from created user
+        message = AsyncMock()
+        message.text = "Кофе 150"
+        message.from_user = MagicMock()
+        message.from_user.id = 200
+        message.answer = AsyncMock()
+
+        state = AsyncMock()
+        state.get_data = AsyncMock(return_value={})
+        state.set_state = AsyncMock()
+        state.update_data = AsyncMock()
+        state.clear = AsyncMock()
+
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch(
+                "bot.routers.messages.save_message",
+                new=AsyncMock(side_effect=db.save_message),
+            ),
+        ):
+            mock_get_session.return_value.__aenter__.return_value = AsyncMock()
+            await handle_message(message, state)
+
+        # Bot responded with success
+        message.answer.assert_called_once()
+        answer_text = message.answer.call_args[0][0]
+        assert "Записано 1 расход" in answer_text
+        assert "Кофе: 150" in answer_text
+
+        # Cost saved in DB
+        assert len(db.messages) == 1
+        saved = list(db.messages.values())[0]
+        assert saved.user_id == 200
+        assert "Кофе" in saved.text
+
+    # --- Scenario: large Telegram ID (exceeds INT32 range) ---
+
+    @pytest.mark.asyncio
+    async def test_large_telegram_id_user_creation_and_cost(self, db, users_patches, costs_patches):
+        """User with a large Telegram ID (>INT32) can be created and add costs.
+
+        Telegram IDs can exceed 2^31-1 (e.g. 7435384565). This test verifies
+        that user creation and cost addition work with such IDs, confirming
+        the BigInteger column type fix for messages.user_id.
+        """
+        big_tid = 7435384565  # exceeds INT32 max (2_147_483_647)
+
+        # Admin creates user with large Telegram ID
+        async with _client() as c:
+            csrf = await _login(c)
+            r = await c.post(
+                "/users/add",
+                data={"name": "BigID User", "telegram_id": str(big_tid), "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # User appears in the list
+            r = await c.get("/users")
+            assert "BigID User" in r.text
+            assert str(big_tid) in r.text
+
+        # User logs in and adds a cost
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=big_tid)
+            token = c.cookies[SESSION_COOKIE]
+            assert auth_sessions[token]["telegram_id"] == big_tid
+
+            r = await c.post(
+                "/costs/add",
+                data={
+                    "name": "Кофе",
+                    "amount": "250",
+                    "user_id": str(big_tid),
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # Cost visible in list
+            r = await c.get("/costs")
+            assert "Кофе" in r.text
+
+        # Verify stored user_id is the large value
+        saved = list(db.messages.values())[0]
+        assert saved.user_id == big_tid
