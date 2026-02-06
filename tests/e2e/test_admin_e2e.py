@@ -1715,3 +1715,56 @@ class TestBootstrapAndUserLifecycle:
         saved = list(db.messages.values())[0]
         assert saved.user_id == 200
         assert "Кофе" in saved.text
+
+    # --- Scenario: large Telegram ID (exceeds INT32 range) ---
+
+    @pytest.mark.asyncio
+    async def test_large_telegram_id_user_creation_and_cost(self, db, users_patches, costs_patches):
+        """User with a large Telegram ID (>INT32) can be created and add costs.
+
+        Telegram IDs can exceed 2^31-1 (e.g. 7435384565). This test verifies
+        that user creation and cost addition work with such IDs, confirming
+        the BigInteger column type fix for messages.user_id.
+        """
+        big_tid = 7435384565  # exceeds INT32 max (2_147_483_647)
+
+        # Admin creates user with large Telegram ID
+        async with _client() as c:
+            csrf = await _login(c)
+            r = await c.post(
+                "/users/add",
+                data={"name": "BigID User", "telegram_id": str(big_tid), "csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # User appears in the list
+            r = await c.get("/users")
+            assert "BigID User" in r.text
+            assert str(big_tid) in r.text
+
+        # User logs in and adds a cost
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=big_tid)
+            token = c.cookies[SESSION_COOKIE]
+            assert auth_sessions[token]["telegram_id"] == big_tid
+
+            r = await c.post(
+                "/costs/add",
+                data={
+                    "name": "Кофе",
+                    "amount": "250",
+                    "user_id": str(big_tid),
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+            # Cost visible in list
+            r = await c.get("/costs")
+            assert "Кофе" in r.text
+
+        # Verify stored user_id is the large value
+        saved = list(db.messages.values())[0]
+        assert saved.user_id == big_tid
