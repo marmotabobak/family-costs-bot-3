@@ -37,6 +37,18 @@
             </select>
         </div>
 
+        {% if user %}
+        <div class="form-group">
+            <label for="new_password">Новый пароль (оставьте пустым, чтобы не менять):</label>
+            <input type="password" id="new_password" name="new_password" class="form-input" minlength="4" placeholder="Оставьте пустым, чтобы не менять">
+        </div>
+        {% else %}
+        <div class="form-group">
+            <label for="password">Пароль:</label>
+            <input type="password" id="password" name="password" required class="form-input" minlength="4" placeholder="Минимум 4 символа">
+        </div>
+        {% endif %}
+
         <div class="form-actions">
             <a href="{{ root_path }}/users" class="btn btn-secondary">Отмена</a>
             <button type="submit" class="btn btn-primary">{% if user %}Сохранить{% else %}Добавить{% endif %}</button>

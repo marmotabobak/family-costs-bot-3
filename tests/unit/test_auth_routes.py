@@ -7,16 +7,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from bot.security import hash_password
 from bot.web.app import app
 from bot.web.auth import SESSION_COOKIE, auth_sessions
 
 
-def _make_user(id=1, telegram_id=123, name="Иван", role="user"):
+def _make_user(id=1, telegram_id=123, name="Иван", role="user", password_hash=None):
     user = MagicMock()
     user.id = id
     user.telegram_id = telegram_id
     user.name = name
     user.role = role
+    user.password_hash = password_hash
     return user
 
 
@@ -64,7 +66,8 @@ class TestLoginPost:
     @pytest.mark.asyncio
     async def test_login_with_correct_password(self):
         """Correct password and valid user creates session and redirects."""
-        user = _make_user(1, 123, "Иван", "user")
+        hashed = hash_password("secret")
+        user = _make_user(1, 123, "Иван", "user", password_hash=hashed)
         users = [user]
 
         with (
@@ -73,7 +76,6 @@ class TestLoginPost:
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
             patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
-            mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
@@ -88,6 +90,7 @@ class TestLoginPost:
 
         # Verify session has user info
         session_token = response.cookies[SESSION_COOKIE]
+        assert auth_sessions[session_token]["user_id"] == 1
         assert auth_sessions[session_token]["telegram_id"] == 123
         assert auth_sessions[session_token]["user_name"] == "Иван"
         assert auth_sessions[session_token]["role"] == "user"
@@ -98,14 +101,16 @@ class TestLoginPost:
     @pytest.mark.asyncio
     async def test_login_with_wrong_password(self):
         """Wrong password returns login page with error."""
-        users = [_make_user(1, 123, "Иван", "user")]
+        hashed = hash_password("secret")
+        user = _make_user(1, 123, "Иван", "user", password_hash=hashed)
+        users = [user]
 
         with (
             patch("bot.web.auth.settings") as mock_settings,
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
-            mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
@@ -137,16 +142,17 @@ class TestLoginPost:
         assert "Пользователь не найден" in response.text
 
     @pytest.mark.asyncio
-    async def test_login_when_password_not_configured(self):
-        """Shows error when WEB_PASSWORD not set."""
-        users = [_make_user(1, 123, "Иван", "user")]
+    async def test_login_user_without_password_hash(self):
+        """Shows error when user has no password_hash set."""
+        user = _make_user(1, 123, "Иван", "user", password_hash=None)
+        users = [user]
 
         with (
             patch("bot.web.auth.settings") as mock_settings,
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
-            mock_settings.web_password = ""
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
@@ -154,13 +160,14 @@ class TestLoginPost:
                 response = await client.post("/login", data={"password": "anything", "user_id": "123"})
 
         assert response.status_code == 200
-        assert "Пароль не настроен" in response.text
+        assert "Пароль для этого пользователя не установлен" in response.text
 
     @pytest.mark.asyncio
     async def test_login_rate_limiting(self):
         """After MAX_LOGIN_ATTEMPTS failures, login is rate-limited."""
-        from bot.web.auth import login_attempts, MAX_LOGIN_ATTEMPTS
         import time
+
+        from bot.web.auth import MAX_LOGIN_ATTEMPTS, login_attempts
 
         ip = "127.0.0.1"
         users = [_make_user(1, 123, "Иван", "user")]
@@ -170,7 +177,6 @@ class TestLoginPost:
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session),
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
         ):
-            mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
 
@@ -188,7 +194,8 @@ class TestLoginPost:
     @pytest.mark.asyncio
     async def test_login_auto_promotes_admin_telegram_id(self):
         """User matching ADMIN_TELEGRAM_ID is auto-promoted to admin."""
-        user = _make_user(1, 555, "Будущий Админ", "user")
+        hashed = hash_password("secret")
+        user = _make_user(1, 555, "Будущий Админ", "user", password_hash=hashed)
         users = [user]
 
         mock_session = AsyncMock()
@@ -203,7 +210,6 @@ class TestLoginPost:
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
             patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
-            mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
             mock_settings.admin_telegram_id = 555
@@ -226,7 +232,8 @@ class TestLoginPost:
     @pytest.mark.asyncio
     async def test_login_no_promotion_without_admin_telegram_id(self):
         """Without ADMIN_TELEGRAM_ID, no auto-promotion happens."""
-        user = _make_user(1, 123, "Иван", "user")
+        hashed = hash_password("secret")
+        user = _make_user(1, 123, "Иван", "user", password_hash=hashed)
         users = [user]
 
         with (
@@ -235,7 +242,6 @@ class TestLoginPost:
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
             patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
-            mock_settings.web_password = "secret"
             mock_settings.web_root_path = ""
             mock_settings.env = "test"
             mock_settings.admin_telegram_id = None

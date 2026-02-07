@@ -128,7 +128,7 @@ class TestAddUserRoute:
                 response = await client.post(
                     "/users/add",
                     cookies={"costs_session": token},
-                    data={"name": "Новый", "telegram_id": "999", "csrf_token": csrf},
+                    data={"name": "Новый", "telegram_id": "999", "password": "test1234", "csrf_token": csrf},
                     follow_redirects=False,
                 )
 
@@ -145,7 +145,7 @@ class TestAddUserRoute:
             response = await client.post(
                 "/users/add",
                 cookies={"costs_session": token},
-                data={"name": "  ", "telegram_id": "999", "csrf_token": csrf},
+                data={"name": "  ", "telegram_id": "999", "password": "test1234", "csrf_token": csrf},
             )
 
         _cleanup_auth(token)
@@ -161,7 +161,7 @@ class TestAddUserRoute:
             response = await client.post(
                 "/users/add",
                 cookies={"costs_session": token},
-                data={"name": "Тест", "telegram_id": "abc", "csrf_token": csrf},
+                data={"name": "Тест", "telegram_id": "abc", "password": "test1234", "csrf_token": csrf},
             )
 
         _cleanup_auth(token)
@@ -177,7 +177,7 @@ class TestAddUserRoute:
             response = await client.post(
                 "/users/add",
                 cookies={"costs_session": token},
-                data={"name": "Тест", "telegram_id": "-5", "csrf_token": csrf},
+                data={"name": "Тест", "telegram_id": "-5", "password": "test1234", "csrf_token": csrf},
             )
 
         _cleanup_auth(token)
@@ -202,12 +202,45 @@ class TestAddUserRoute:
                 response = await client.post(
                     "/users/add",
                     cookies={"costs_session": token},
-                    data={"name": "Тест", "telegram_id": "123", "csrf_token": csrf},
+                    data={"name": "Тест", "telegram_id": "123", "password": "test1234", "csrf_token": csrf},
                 )
 
         _cleanup_auth(token)
         assert response.status_code == 200
         assert "уже существует" in response.text
+
+    @pytest.mark.asyncio
+    async def test_add_user_short_password_shows_error(self):
+        """Password shorter than 4 characters shows validation error."""
+        token, csrf = _setup_auth()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/users/add",
+                cookies={"costs_session": token},
+                data={"name": "Тест", "telegram_id": "999", "password": "abc", "csrf_token": csrf},
+            )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "не менее 4 символов" in response.text
+
+    @pytest.mark.asyncio
+    async def test_add_user_missing_password_shows_error(self):
+        """Missing password field shows validation error."""
+        token, csrf = _setup_auth()
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/users/add",
+                cookies={"costs_session": token},
+                data={"name": "Тест", "telegram_id": "999", "csrf_token": csrf},
+                # password field is missing
+            )
+
+        _cleanup_auth(token)
+        # FastAPI Form(...) validation should fail - expect 422
+        assert response.status_code == 422
 
 
 class TestEditUserRoute:
@@ -346,9 +379,11 @@ class TestDeleteUserRoute:
     async def test_delete_user_success(self):
         """Successful delete redirects to /users."""
         token, csrf = _setup_auth()
+        regular_user = _make_user(1, 123, "Иван", "user")
 
         with (
             patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=regular_user)),
             patch("bot.web.users.delete_user", new=AsyncMock(return_value=True)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -370,6 +405,7 @@ class TestDeleteUserRoute:
 
         with (
             patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=None)),
             patch("bot.web.users.delete_user", new=AsyncMock(return_value=False)),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -505,7 +541,7 @@ class TestRoleBasedAccess:
                 response = await client.post(
                     "/users/add",
                     cookies={"costs_session": token},
-                    data={"name": "Новый", "telegram_id": "333", "role": "admin", "csrf_token": csrf},
+                    data={"name": "Новый", "telegram_id": "333", "role": "admin", "password": "test1234", "csrf_token": csrf},
                     follow_redirects=False,
                 )
 
@@ -522,7 +558,7 @@ class TestRoleBasedAccess:
             response = await client.post(
                 "/users/add",
                 cookies={"costs_session": token},
-                data={"name": "Тест", "telegram_id": "999", "role": "invalid_role", "csrf_token": csrf},
+                data={"name": "Тест", "telegram_id": "999", "role": "invalid_role", "password": "test1234", "csrf_token": csrf},
             )
 
         _cleanup_auth(token)
@@ -545,6 +581,184 @@ class TestRoleBasedAccess:
                     "/users/1/edit",
                     cookies={"costs_session": token},
                     data={"name": "Иван", "telegram_id": "123", "role": "admin", "csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/users" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_edit_user_with_new_password(self):
+        """Admin can reset user password via edit form."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        user = _make_user(1, 123, "Иван", "user")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user_password", new=AsyncMock(return_value=user)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={
+                        "name": "Иван",
+                        "telegram_id": "123",
+                        "role": "user",
+                        "new_password": "new_pass_123",
+                        "csrf_token": csrf,
+                    },
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/users" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_edit_user_empty_new_password_leaves_unchanged(self):
+        """Empty new_password field does not change password."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        user = _make_user(1, 123, "Иван", "user")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user", new=AsyncMock(return_value=user)),
+            patch("bot.web.users.update_user_password", new=AsyncMock(return_value=user)) as mock_update_pwd,
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "Иван", "telegram_id": "123", "role": "user", "new_password": "", "csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        mock_update_pwd.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_edit_user_short_new_password_shows_error(self):
+        """New password shorter than 4 characters shows validation error."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        user = _make_user(1, 123, "Иван", "user")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=user)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={
+                        "name": "Иван",
+                        "telegram_id": "123",
+                        "role": "user",
+                        "new_password": "abc",  # Too short
+                        "csrf_token": csrf,
+                    },
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "не менее 4 символов" in response.text
+
+    @pytest.mark.asyncio
+    async def test_delete_last_admin_shows_error(self):
+        """Deleting the only admin shows error and redirects."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        admin_user = _make_user(1, 111, "Админ", "admin")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=admin_user)),
+            patch("bot.web.users.count_admins", new=AsyncMock(return_value=1)),
+            patch("bot.web.users.delete_user", new=AsyncMock()) as mock_delete,
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/delete",
+                    cookies={"costs_session": token},
+                    data={"csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/users" in response.headers["location"]
+        mock_delete.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_non_last_admin_succeeds(self):
+        """Deleting one of multiple admins succeeds."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        admin_user = _make_user(1, 111, "Админ", "admin")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=admin_user)),
+            patch("bot.web.users.count_admins", new=AsyncMock(return_value=2)),
+            patch("bot.web.users.delete_user", new=AsyncMock(return_value=True)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/delete",
+                    cookies={"costs_session": token},
+                    data={"csrf_token": csrf},
+                    follow_redirects=False,
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 303
+        assert "/users" in response.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_demote_last_admin_shows_error(self):
+        """Changing last admin's role to user shows error."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        admin_user = _make_user(1, 111, "Админ", "admin")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=admin_user)),
+            patch("bot.web.users.count_admins", new=AsyncMock(return_value=1)),
+            patch("bot.web.users.update_user", new=AsyncMock()) as mock_update,
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "Админ", "telegram_id": "111", "role": "user", "csrf_token": csrf},
+                )
+
+        _cleanup_auth(token)
+        assert response.status_code == 200
+        assert "единственного администратора" in response.text
+        mock_update.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_demote_non_last_admin_succeeds(self):
+        """Changing one of multiple admins to user succeeds."""
+        token, csrf = _setup_auth(role="admin", telegram_id=111, user_name="Админ")
+        admin_user = _make_user(1, 222, "Второй админ", "admin")
+
+        with (
+            patch("bot.web.users.get_db_session", side_effect=_mock_db_session),
+            patch("bot.web.users.get_user_by_id", new=AsyncMock(return_value=admin_user)),
+            patch("bot.web.users.count_admins", new=AsyncMock(return_value=2)),  # Two admins
+            patch("bot.web.users.update_user", new=AsyncMock(return_value=admin_user)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                response = await client.post(
+                    "/users/1/edit",
+                    cookies={"costs_session": token},
+                    data={"name": "Второй админ", "telegram_id": "222", "role": "user", "csrf_token": csrf},
                     follow_redirects=False,
                 )
 

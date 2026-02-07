@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     env: Environment = Environment.prod
     admin_telegram_id: int | None = None
     web_base_url: str = "http://localhost:8000"
-    web_password: str = ""
+    admin_default_password: str = ""
     web_root_path: str = ""
 
     @field_validator("bot_token")

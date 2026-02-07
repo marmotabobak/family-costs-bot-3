@@ -15,6 +15,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import IntegrityError
 
+from bot.security import hash_password
 from bot.web.app import app, import_sessions
 from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
@@ -23,6 +24,7 @@ from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 # ---------------------------------------------------------------------------
 
 _PASS = "e2e-test-pass"
+_PASS_HASH = hash_password(_PASS)
 
 
 @asynccontextmanager
@@ -42,12 +44,13 @@ class FakeDB:
 
     # --- user repo ---
 
-    def _make_user(self, uid, tid, name, role="user"):
+    def _make_user(self, uid, tid, name, role="user", password_hash=None):
         u = MagicMock()
         u.id = uid
         u.telegram_id = tid
         u.name = name
         u.role = role
+        u.password_hash = password_hash
         u.created_at = MagicMock()
         u.created_at.strftime = MagicMock(return_value="01.01.2026 12:00")
         return u
@@ -64,13 +67,13 @@ class FakeDB:
                 return u
         return None
 
-    async def create_user(self, session, telegram_id, name):
+    async def create_user(self, session, telegram_id, name, password_hash=None):
         for u in self.users.values():
             if u.telegram_id == telegram_id:
                 raise IntegrityError("duplicate", None, Exception("duplicate"))
         uid = self._next_uid
         self._next_uid += 1
-        self.users[uid] = self._make_user(uid, telegram_id, name)
+        self.users[uid] = self._make_user(uid, telegram_id, name, password_hash=password_hash)
         return self.users[uid]
 
     async def update_user(self, session, user_id, telegram_id, name, role=None):
@@ -88,6 +91,16 @@ class FakeDB:
             del self.users[user_id]
             return True
         return False
+
+    async def update_user_password(self, session, user_id, password_hash):
+        u = self.users.get(user_id)
+        if not u:
+            return None
+        u.password_hash = password_hash
+        return u
+
+    async def count_admins(self, session):
+        return sum(1 for u in self.users.values() if u.role == "admin")
 
     # --- messages repo ---
 
@@ -183,11 +196,11 @@ SAMPLE_CHECKS = {
 
 @pytest.fixture(autouse=True)
 def _patch_auth_settings():
-    """Make login work with a known password for all tests in this module."""
+    """Patch settings for all tests in this module."""
     with patch("bot.web.auth.settings") as mock:
-        mock.web_password = _PASS
         mock.web_root_path = ""
         mock.env = "test"
+        mock.admin_telegram_id = None
         yield
 
 
@@ -204,7 +217,7 @@ def _cleanup_global_state():
 def db():
     fake = FakeDB()
     # Pre-seed default admin user for login
-    fake.users[1] = fake._make_user(1, 100, "Тестовый Админ", role="admin")
+    fake.users[1] = fake._make_user(1, 100, "Тестовый Админ", role="admin", password_hash=_PASS_HASH)
     fake._next_uid = 2
     return fake
 
@@ -230,6 +243,19 @@ def users_patches(db):
         patch("bot.web.users.create_user", new=AsyncMock(side_effect=db.create_user)),
         patch("bot.web.users.update_user", new=AsyncMock(side_effect=db.update_user)),
         patch("bot.web.users.delete_user", new=AsyncMock(side_effect=db.delete_user)),
+        patch("bot.web.users.update_user_password", new=AsyncMock(side_effect=db.update_user_password)),
+        patch("bot.web.users.count_admins", new=AsyncMock(side_effect=db.count_admins)),
+    ):
+        yield
+
+
+@pytest.fixture
+def profile_patches(db):
+    """Patch all profile-route DB calls with FakeDB."""
+    with (
+        patch("bot.web.profile.get_db_session", side_effect=_fake_session),
+        patch("bot.web.profile.get_user_by_id", new=AsyncMock(side_effect=db.get_user_by_id)),
+        patch("bot.web.profile.update_user_password", new=AsyncMock(side_effect=db.update_user_password)),
     ):
         yield
 
@@ -283,7 +309,7 @@ async def _login_as_user(client: AsyncClient, db: FakeDB, telegram_id: int, name
     if not existing:
         uid = db._next_uid
         db._next_uid += 1
-        db.users[uid] = db._make_user(uid, telegram_id, name, role="user")
+        db.users[uid] = db._make_user(uid, telegram_id, name, role="user", password_hash=_PASS_HASH)
     return await _login(client, telegram_id)
 
 
@@ -382,7 +408,7 @@ class TestUsersCRUDJourney:
             # Add user
             r = await c.post(
                 "/users/add",
-                data={"name": "Алёна", "telegram_id": "111", "csrf_token": csrf},
+                data={"name": "Алёна", "telegram_id": "111", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
             assert r.status_code == 303
@@ -436,7 +462,7 @@ class TestUsersCRUDJourney:
             csrf = await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "   ", "telegram_id": "111", "csrf_token": csrf},
+                data={"name": "   ", "telegram_id": "111", "password": _PASS, "csrf_token": csrf},
             )
         assert r.status_code == 200
         assert "Имя не может быть пустым" in r.text
@@ -448,7 +474,7 @@ class TestUsersCRUDJourney:
             csrf = await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "Тест", "telegram_id": "abc", "csrf_token": csrf},
+                data={"name": "Тест", "telegram_id": "abc", "password": _PASS, "csrf_token": csrf},
             )
         assert "Telegram ID должен быть числом" in r.text
 
@@ -459,7 +485,7 @@ class TestUsersCRUDJourney:
             csrf = await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "Тест", "telegram_id": "0", "csrf_token": csrf},
+                data={"name": "Тест", "telegram_id": "0", "password": _PASS, "csrf_token": csrf},
             )
         assert "Telegram ID должен быть больше 0" in r.text
 
@@ -471,13 +497,13 @@ class TestUsersCRUDJourney:
             # First add succeeds
             await c.post(
                 "/users/add",
-                data={"name": "Первый", "telegram_id": "999", "csrf_token": csrf},
+                data={"name": "Первый", "telegram_id": "999", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
             # Second with same ID
             r = await c.post(
                 "/users/add",
-                data={"name": "Второй", "telegram_id": "999", "csrf_token": csrf},
+                data={"name": "Второй", "telegram_id": "999", "password": _PASS, "csrf_token": csrf},
             )
         assert "уже существует" in r.text
 
@@ -1114,7 +1140,7 @@ class TestSecurityScenarios:
             await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "X", "telegram_id": "1", "csrf_token": ""},
+                data={"name": "X", "telegram_id": "1", "password": _PASS, "csrf_token": ""},
             )
         assert r.status_code == 403
 
@@ -1125,7 +1151,7 @@ class TestSecurityScenarios:
             await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "X", "telegram_id": "1", "csrf_token": "tampered-token"},
+                data={"name": "X", "telegram_id": "1", "password": _PASS, "csrf_token": "tampered-token"},
             )
         assert r.status_code == 403
 
@@ -1518,7 +1544,7 @@ class TestBootstrapAndUserLifecycle:
     async def test_migration_seeded_admin_appears_in_dropdown(self, db):
         """Admin seeded by migration appears in login dropdown."""
         db.users.clear()
-        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin")
+        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin", password_hash=_PASS_HASH)
 
         async with _client() as c:
             r = await c.get("/login")
@@ -1528,7 +1554,7 @@ class TestBootstrapAndUserLifecycle:
     async def test_migration_seeded_admin_can_login_with_full_access(self, db, users_patches, costs_patches):
         """Admin seeded by migration can log in and access all panel sections."""
         db.users.clear()
-        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin")
+        db.users[1] = db._make_user(1, 555, "Seed Admin", role="admin", password_hash=_PASS_HASH)
 
         async with _client() as c:
             await _login(c, telegram_id=555)
@@ -1553,7 +1579,7 @@ class TestBootstrapAndUserLifecycle:
             csrf = await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                data={"name": "Мария", "telegram_id": "200", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
             assert r.status_code == 303
@@ -1569,7 +1595,7 @@ class TestBootstrapAndUserLifecycle:
             csrf = await _login(c)
             await c.post(
                 "/users/add",
-                data={"name": "Обычный", "telegram_id": "200", "csrf_token": csrf},
+                data={"name": "Обычный", "telegram_id": "200", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
 
@@ -1597,7 +1623,7 @@ class TestBootstrapAndUserLifecycle:
             csrf = await _login(c)
             await c.post(
                 "/users/add",
-                data={"name": "Бот-юзер", "telegram_id": "200", "csrf_token": csrf},
+                data={"name": "Бот-юзер", "telegram_id": "200", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
 
@@ -1642,7 +1668,7 @@ class TestBootstrapAndUserLifecycle:
             csrf = await _login(c)
             await c.post(
                 "/users/add",
-                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                data={"name": "Мария", "telegram_id": "200", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
 
@@ -1677,7 +1703,7 @@ class TestBootstrapAndUserLifecycle:
             csrf = await _login(c)
             await c.post(
                 "/users/add",
-                data={"name": "Мария", "telegram_id": "200", "csrf_token": csrf},
+                data={"name": "Мария", "telegram_id": "200", "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
 
@@ -1733,7 +1759,7 @@ class TestBootstrapAndUserLifecycle:
             csrf = await _login(c)
             r = await c.post(
                 "/users/add",
-                data={"name": "BigID User", "telegram_id": str(big_tid), "csrf_token": csrf},
+                data={"name": "BigID User", "telegram_id": str(big_tid), "password": _PASS, "csrf_token": csrf},
                 follow_redirects=False,
             )
             assert r.status_code == 303
@@ -1768,3 +1794,446 @@ class TestBootstrapAndUserLifecycle:
         # Verify stored user_id is the large value
         saved = list(db.messages.values())[0]
         assert saved.user_id == big_tid
+
+
+# ===========================================================================
+# 9. Per-User Passwords Feature Tests
+# ===========================================================================
+
+
+class TestPasswordLifecycleJourney:
+    """E2E: Per-user password lifecycle - create, change, reset."""
+
+    @pytest.mark.asyncio
+    async def test_admin_creates_user_with_password_and_user_logs_in(self, users_patches, db):
+        """Admin creates a user with password, user logs in successfully."""
+        async with _client() as c:
+            csrf = await _login(c)  # Login as admin
+
+            # Admin creates new user with password
+            r = await c.post(
+                "/users/add",
+                data={
+                    "name": "Новый Пользователь",
+                    "telegram_id": "777",
+                    "password": "user_pass_123",
+                    "role": "user",
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/users" in r.headers["location"]
+
+            # Verify user appears in list
+            r = await c.get("/users")
+            assert "Новый Пользователь" in r.text
+
+        # New user logs in with their password
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": "user_pass_123", "user_id": "777"},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/costs" in r.headers["location"]
+            token = c.cookies[SESSION_COOKIE]
+            assert auth_sessions[token]["telegram_id"] == 777
+            assert auth_sessions[token]["user_name"] == "Новый Пользователь"
+
+    @pytest.mark.asyncio
+    async def test_user_changes_own_password(self, users_patches, profile_patches, db):
+        """User changes their own password via profile page."""
+        # Create user with known password
+        user_tid = 888
+        old_password = "old_pass_123"
+        new_password = "new_pass_456"
+        db.users[5] = db._make_user(5, user_tid, "Тестовый Юзер", "user", hash_password(old_password))
+
+        # Login with old password
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": old_password, "user_id": str(user_tid)},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            csrf = auth_sessions[c.cookies[SESSION_COOKIE]]["csrf_token"]
+
+            # Access change password form
+            r = await c.get("/profile/change-password")
+            assert r.status_code == 200
+            assert "Текущий пароль" in r.text
+
+            # Change password
+            r = await c.post(
+                "/profile/change-password",
+                data={
+                    "current_password": old_password,
+                    "new_password": new_password,
+                    "confirm_password": new_password,
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/costs" in r.headers["location"]
+
+        # Login with new password
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": new_password, "user_id": str(user_tid)},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/costs" in r.headers["location"]
+
+        # Old password should fail
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": old_password, "user_id": str(user_tid)},
+            )
+            assert r.status_code == 200
+            assert "Неверный пароль" in r.text
+
+    @pytest.mark.asyncio
+    async def test_admin_resets_user_password(self, users_patches, db):
+        """Admin resets user's password via edit form."""
+        user_tid = 999
+        old_password = "old_user_pass"
+        new_password = "reset_pass_123"
+        db.users[6] = db._make_user(6, user_tid, "Сброс Пароля", "user", hash_password(old_password))
+
+        # Admin resets user's password
+        async with _client() as c:
+            csrf = await _login(c)  # Login as admin
+
+            r = await c.post(
+                "/users/6/edit",
+                data={
+                    "name": "Сброс Пароля",
+                    "telegram_id": str(user_tid),
+                    "role": "user",
+                    "new_password": new_password,
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+        # User logs in with new password
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": new_password, "user_id": str(user_tid)},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+
+        # Old password should fail
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": old_password, "user_id": str(user_tid)},
+            )
+            assert r.status_code == 200
+            assert "Неверный пароль" in r.text
+
+    @pytest.mark.asyncio
+    async def test_user_without_password_cannot_login(self, db):
+        """User with NULL password_hash cannot login."""
+        user_tid = 1111
+        db.users[7] = db._make_user(7, user_tid, "Без Пароля", "user", password_hash=None)
+
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": "any_password", "user_id": str(user_tid)},
+            )
+            assert r.status_code == 200
+            assert "Пароль для этого пользователя не установлен" in r.text
+
+
+class TestLastAdminProtection:
+    """E2E: Last admin protection - cannot be deleted or demoted."""
+
+    @pytest.mark.asyncio
+    async def test_last_admin_cannot_be_deleted(self, users_patches, db):
+        """Deleting the only admin shows error and does not delete."""
+        # Ensure only one admin exists
+        db.users.clear()
+        db.users[1] = db._make_user(1, 100, "Единственный Админ", "admin", _PASS_HASH)
+
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=100)
+            token = c.cookies[SESSION_COOKIE]
+
+            # Attempt to delete the only admin
+            r = await c.post(
+                "/users/1/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/users" in r.headers["location"]
+
+            # Check flash message
+            session = auth_sessions[token]
+            assert session.get("flash_message") == "Нельзя удалить единственного администратора"
+            assert session.get("flash_type") == "error"
+
+        # Verify admin still exists
+        assert 1 in db.users
+        assert db.users[1].role == "admin"
+
+    @pytest.mark.asyncio
+    async def test_last_admin_cannot_be_demoted(self, users_patches, db):
+        """Demoting the only admin shows error and does not change role."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 100, "Единственный Админ", "admin", _PASS_HASH)
+
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=100)
+
+            # Attempt to demote the only admin
+            r = await c.post(
+                "/users/1/edit",
+                data={
+                    "name": "Единственный Админ",
+                    "telegram_id": "100",
+                    "role": "user",  # Attempting to demote
+                    "csrf_token": csrf,
+                },
+            )
+            assert r.status_code == 200
+            assert "Нельзя снять роль администратора у единственного администратора" in r.text
+
+        # Verify admin role unchanged
+        assert db.users[1].role == "admin"
+
+    @pytest.mark.asyncio
+    async def test_non_last_admin_can_be_deleted(self, users_patches, db):
+        """Deleting one of two admins succeeds."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 100, "Админ 1", "admin", _PASS_HASH)
+        db.users[2] = db._make_user(2, 200, "Админ 2", "admin", _PASS_HASH)
+
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=100)
+            token = c.cookies[SESSION_COOKIE]
+
+            # Delete second admin
+            r = await c.post(
+                "/users/2/delete",
+                data={"csrf_token": csrf},
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/users" in r.headers["location"]
+
+            # Check flash message
+            session = auth_sessions[token]
+            assert "успешно удалён" in session.get("flash_message", "")
+
+        # Verify second admin deleted, first remains
+        assert 1 in db.users
+        assert 2 not in db.users
+
+    @pytest.mark.asyncio
+    async def test_non_last_admin_can_be_demoted(self, users_patches, db):
+        """Demoting one of two admins succeeds."""
+        db.users.clear()
+        db.users[1] = db._make_user(1, 100, "Админ 1", "admin", _PASS_HASH)
+        db.users[2] = db._make_user(2, 200, "Админ 2", "admin", _PASS_HASH)
+
+        async with _client() as c:
+            csrf = await _login(c, telegram_id=100)
+            token = c.cookies[SESSION_COOKIE]
+
+            # Demote second admin
+            r = await c.post(
+                "/users/2/edit",
+                data={
+                    "name": "Админ 2",
+                    "telegram_id": "200",
+                    "role": "user",
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            assert r.status_code == 303
+            assert "/users" in r.headers["location"]
+
+            # Check flash message
+            session = auth_sessions[token]
+            assert "успешно обновлён" in session.get("flash_message", "")
+
+        # Verify second admin demoted
+        assert db.users[2].role == "user"
+        assert db.users[1].role == "admin"
+
+
+class TestUIUXIntegration:
+    """E2E: UI/UX integration - password fields, links visibility."""
+
+    @pytest.mark.asyncio
+    async def test_change_password_link_visible_to_all_users(self, users_patches, costs_patches, db):
+        """Non-admin user sees change password link in navigation."""
+        user_tid = 1234
+        db.users[8] = db._make_user(8, user_tid, "Обычный Юзер", "user", _PASS_HASH)
+
+        async with _client() as c:
+            await _login(c, telegram_id=user_tid)
+            r = await c.get("/costs")
+
+        assert "Сменить пароль" in r.text
+        assert "/profile/change-password" in r.text
+
+    @pytest.mark.asyncio
+    async def test_change_password_link_visible_to_admin(self, costs_patches, db):
+        """Admin user sees change password link in navigation."""
+        async with _client() as c:
+            await _login(c)  # Login as admin
+            r = await c.get("/costs")
+
+        assert "Сменить пароль" in r.text
+        assert "/profile/change-password" in r.text
+
+    @pytest.mark.asyncio
+    async def test_user_form_has_password_field_on_create(self, users_patches, db):
+        """Add user form has required password field."""
+        async with _client() as c:
+            await _login(c)
+            r = await c.get("/users/add")
+
+        assert r.status_code == 200
+        assert 'name="password"' in r.text
+        assert 'type="password"' in r.text
+        assert 'required' in r.text.lower()
+
+    @pytest.mark.asyncio
+    async def test_user_form_has_optional_password_on_edit(self, users_patches, db):
+        """Edit user form has optional new_password field."""
+        async with _client() as c:
+            await _login(c)
+            r = await c.get("/users/1/edit")
+
+        assert r.status_code == 200
+        assert 'name="new_password"' in r.text
+        assert 'type="password"' in r.text
+        # Should NOT be required (optional for admin reset)
+        assert 'id="new_password"' in r.text
+
+
+class TestEdgeCases:
+    """E2E: Edge cases - empty password, whitespace, rate limiting."""
+
+    @pytest.mark.asyncio
+    async def test_login_with_empty_password(self, users_patches, db):
+        """Login with empty password fails validation."""
+        async with _client() as c:
+            r = await c.post(
+                "/login",
+                data={"password": "", "user_id": "100"},
+            )
+            # Form validation should catch this, or server returns error
+            assert r.status_code in (200, 422)
+
+    @pytest.mark.asyncio
+    async def test_create_user_with_whitespace_password(self, users_patches, db):
+        """Creating user with whitespace-only password fails validation."""
+        async with _client() as c:
+            csrf = await _login(c)
+
+            r = await c.post(
+                "/users/add",
+                data={
+                    "name": "Тест",
+                    "telegram_id": "2222",
+                    "password": "   ",  # Whitespace only
+                    "role": "user",
+                    "csrf_token": csrf,
+                },
+            )
+            # Should fail because len("   ".strip()) < 4 is true, but server validates len("   ") which is 3
+            # Actually the server validates len(password) < 4, so "   " has len=3 and fails
+            assert r.status_code == 200
+            assert "не менее 4 символов" in r.text
+
+    @pytest.mark.asyncio
+    async def test_change_password_current_same_as_new(self, users_patches, profile_patches, db):
+        """Changing password to same password succeeds (no validation preventing this)."""
+        user_tid = 3333
+        password = "same_pass_123"
+
+        async with _client() as c:
+            csrf = await _login_as_user(c, db, user_tid, "Same Pass")
+
+            # Update the user's password to our test password
+            user = await db.get_user_by_telegram_id(None, user_tid)
+            user.password_hash = hash_password(password)
+
+            # Change to same password
+            r = await c.post(
+                "/profile/change-password",
+                data={
+                    "current_password": password,
+                    "new_password": password,  # Same as current
+                    "confirm_password": password,
+                    "csrf_token": csrf,
+                },
+                follow_redirects=False,
+            )
+            # Should succeed (no rule preventing this)
+            assert r.status_code == 303
+            assert "/costs" in r.headers["location"]
+
+    @pytest.mark.asyncio
+    async def test_login_rate_limit_per_user_passwords(self, users_patches, db):
+        """Rate limiting still works with per-user passwords."""
+        user_tid = 4444
+        db.users[10] = db._make_user(10, user_tid, "Rate Limit", "user", hash_password("correct_pass"))
+
+        async with _client() as c:
+            # Make 5 failed login attempts
+            for _ in range(5):
+                await c.post(
+                    "/login",
+                    data={"password": "wrong_password", "user_id": str(user_tid)},
+                )
+
+            # 6th attempt should be rate limited
+            r = await c.post(
+                "/login",
+                data={"password": "wrong_password", "user_id": str(user_tid)},
+            )
+            assert "Слишком много попыток входа" in r.text
+
+        # Clear rate limit tracking for other tests
+        login_attempts.clear()
+
+    @pytest.mark.asyncio
+    async def test_admin_auto_promotion_with_password(self, users_patches, db):
+        """User with ADMIN_TELEGRAM_ID is auto-promoted on login with password."""
+        admin_tid = 5555
+        db.users[11] = db._make_user(11, admin_tid, "Auto Promote", "user", _PASS_HASH)
+
+        # Mock ADMIN_TELEGRAM_ID setting
+        with patch("bot.web.auth.settings") as mock_settings:
+            mock_settings.admin_telegram_id = admin_tid
+            mock_settings.web_root_path = ""
+            mock_settings.env = "test"
+
+            async with _client() as c:
+                r = await c.post(
+                    "/login",
+                    data={"password": _PASS, "user_id": str(admin_tid)},
+                    follow_redirects=False,
+                )
+                assert r.status_code == 303
+
+        # Verify user promoted to admin
+        assert db.users[11].role == "admin"
