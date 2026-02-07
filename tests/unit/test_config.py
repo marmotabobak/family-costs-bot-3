@@ -112,7 +112,7 @@ class TestAdminTelegramId:
 class TestWebSettings:
     """Тесты настроек web-сервера."""
 
-    def test_web_password_default_empty(self):
+    def test_admin_default_password_default_empty(self):
         """По умолчанию пароль пуст."""
 
         class SettingsWithNoEnv(Settings):
@@ -122,29 +122,29 @@ class TestWebSettings:
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
         )
-        assert settings.web_password == ""
+        assert settings.admin_default_password == ""
 
-    def test_web_password_from_value(self):
+    def test_admin_default_password_from_value(self):
         """Пароль принимается явно."""
         settings = Settings(
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
-            web_password="my-secret",
+            admin_default_password="my-secret",
         )
-        assert settings.web_password == "my-secret"
+        assert settings.admin_default_password == "my-secret"
 
-    def test_web_password_from_env(self, monkeypatch):
-        """Пароль читается из переменной окружения WEB_PASSWORD."""
+    def test_admin_default_password_from_env(self, monkeypatch):
+        """Пароль читается из переменной окружения ADMIN_DEFAULT_PASSWORD."""
 
         class SettingsWithNoEnv(Settings):
             model_config = SettingsConfigDict(env_file=None)
 
-        monkeypatch.setenv("WEB_PASSWORD", "from-env")
+        monkeypatch.setenv("ADMIN_DEFAULT_PASSWORD", "from-env")
         settings = SettingsWithNoEnv(
             bot_token="123456789:ABCdefGHIjkl",
             database_url="postgresql://user:pass@localhost/db",
         )
-        assert settings.web_password == "from-env"
+        assert settings.admin_default_password == "from-env"
 
     def test_web_base_url_default(self):
         """По умолчанию базовый URL localhost:8000."""

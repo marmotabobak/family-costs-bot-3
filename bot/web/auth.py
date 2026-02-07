@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from bot.config import Environment, settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
+from bot.security import verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,14 @@ def get_current_user_name(request: Request) -> str | None:
     session = get_session_from_cookie(request)
     if session:
         return session.get("user_name")
+    return None
+
+
+def get_current_user_id(request: Request) -> int | None:
+    """Get current user's DB id from session."""
+    session = get_session_from_cookie(request)
+    if session:
+        return session.get("user_id")
     return None
 
 
@@ -215,29 +224,6 @@ async def login(request: Request, password: str = Form(...), user_id: str = Form
             },
         )
 
-    if not settings.web_password:
-        return templates.TemplateResponse(
-            request,
-            "costs/login.html",
-            {
-                "error": "Пароль не настроен. Установите WEB_PASSWORD в переменных окружения.",
-                "authenticated": False,
-                "users": users,
-            },
-        )
-
-    password_matches = secrets.compare_digest(
-        password.encode("utf-8"), settings.web_password.encode("utf-8")
-    )
-
-    if not password_matches:
-        record_login_attempt(client_ip)
-        return templates.TemplateResponse(
-            request,
-            "costs/login.html",
-            {"error": "Неверный пароль", "authenticated": False, "users": users},
-        )
-
     # Validate user selection
     if not user_id:
         return templates.TemplateResponse(
@@ -266,6 +252,27 @@ async def login(request: Request, password: str = Form(...), user_id: str = Form
                 {"error": "Пользователь не найден", "authenticated": False, "users": users},
             )
 
+        # Check if user has a password set
+        if not user.password_hash:
+            return templates.TemplateResponse(
+                request,
+                "costs/login.html",
+                {
+                    "error": "Пароль для этого пользователя не установлен. Обратитесь к администратору.",
+                    "authenticated": False,
+                    "users": users,
+                },
+            )
+
+        # Verify password
+        if not verify_password(password, str(user.password_hash)):
+            record_login_attempt(client_ip)
+            return templates.TemplateResponse(
+                request,
+                "costs/login.html",
+                {"error": "Неверный пароль", "authenticated": False, "users": users},
+            )
+
         # Auto-promote to admin if telegram_id matches ADMIN_TELEGRAM_ID
         if (
             settings.admin_telegram_id
@@ -283,6 +290,7 @@ async def login(request: Request, password: str = Form(...), user_id: str = Form
         "authenticated": True,
         "created_at": datetime.now(),
         "csrf_token": csrf_token,
+        "user_id": user.id,
         "telegram_id": user.telegram_id,
         "user_name": user.name,
         "role": user.role,

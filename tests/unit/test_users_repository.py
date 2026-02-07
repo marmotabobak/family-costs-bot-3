@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from bot.db.repositories.users import (
+    count_admins,
     create_user,
     delete_user,
     get_all_telegram_ids,
@@ -12,6 +13,7 @@ from bot.db.repositories.users import (
     get_user_by_id,
     get_user_by_telegram_id,
     update_user,
+    update_user_password,
 )
 
 
@@ -25,12 +27,14 @@ def mock_session():
     return session
 
 
-def _make_user(id=1, telegram_id=123, name="Иван"):
+def _make_user(id=1, telegram_id=123, name="Иван", role="user", password_hash=None):
     """Helper to create a mock User object."""
     user = MagicMock()
     user.id = id
     user.telegram_id = telegram_id
     user.name = name
+    user.role = role
+    user.password_hash = password_hash
     return user
 
 
@@ -131,6 +135,19 @@ class TestCreateUser:
         mock_session.flush.assert_awaited_once()
         mock_session.refresh.assert_awaited_once_with(added_user)
 
+    @pytest.mark.asyncio
+    async def test_creates_user_with_password_hash(self, mock_session):
+        """Creates user with password hash."""
+        await create_user(mock_session, telegram_id=123, name="Иван", password_hash="hashed_password")
+
+        mock_session.add.assert_called_once()
+        added_user = mock_session.add.call_args[0][0]
+        assert added_user.telegram_id == 123
+        assert added_user.name == "Иван"
+        assert added_user.password_hash == "hashed_password"
+        mock_session.flush.assert_awaited_once()
+        mock_session.refresh.assert_awaited_once_with(added_user)
+
 
 class TestUpdateUser:
     """Tests for update_user."""
@@ -213,3 +230,58 @@ class TestGetAllTelegramIds:
         result = await get_all_telegram_ids(mock_session)
 
         assert result == []
+
+
+class TestUpdateUserPassword:
+    """Tests for update_user_password."""
+
+    @pytest.mark.asyncio
+    async def test_updates_password_hash(self, mock_session):
+        """Updates user password hash successfully."""
+        existing = _make_user(1, 123, "Иван", password_hash="old_hash")
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = existing
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        result = await update_user_password(mock_session, user_id=1, password_hash="new_hash")
+
+        assert result == existing
+        assert existing.password_hash == "new_hash"
+        mock_session.flush.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_user_not_found(self, mock_session):
+        """Returns None when user doesn't exist."""
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = None
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        result = await update_user_password(mock_session, user_id=999, password_hash="new_hash")
+
+        assert result is None
+
+
+class TestCountAdmins:
+    """Tests for count_admins."""
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_no_admins(self, mock_session):
+        """Returns 0 when there are no admins."""
+        result_mock = MagicMock()
+        result_mock.scalar_one.return_value = 0
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        result = await count_admins(mock_session)
+
+        assert result == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_count_of_admins(self, mock_session):
+        """Returns count of admin users."""
+        result_mock = MagicMock()
+        result_mock.scalar_one.return_value = 3
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        result = await count_admins(mock_session)
+
+        assert result == 3

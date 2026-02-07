@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from bot.config import Environment
 from bot.db.dependencies import get_session
+from bot.security import hash_password
 from bot.db.repositories.messages import (
     delete_message_by_id,
     get_all_costs_paginated,
@@ -58,11 +59,12 @@ def mock_users_form():
         yield
 
 
-def _make_user(telegram_id=100, name="Тест", role="user"):
+def _make_user(telegram_id=100, name="Тест", role="user", password_hash=None):
     user = MagicMock()
     user.telegram_id = telegram_id
     user.name = name
     user.role = role
+    user.password_hash = password_hash
     return user
 
 
@@ -77,12 +79,11 @@ class TestAuthenticationFlow:
     @patch("bot.web.auth.settings")
     def test_full_login_flow(self, mock_settings, client):
         """Test complete login -> use -> logout flow."""
-        mock_settings.web_password = "e2e-test-password"
         mock_settings.env = Environment.test
         mock_settings.web_root_path = ""
         mock_settings.admin_telegram_id = None
 
-        user = _make_user(100, "Иван", "user")
+        user = _make_user(100, "Иван", "user", password_hash=hash_password("e2e-test-password"))
 
         # 1. Access costs page - should redirect to login
         response = client.get("/costs", follow_redirects=False)

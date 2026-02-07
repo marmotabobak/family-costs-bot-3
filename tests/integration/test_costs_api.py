@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from bot.config import Environment
+from bot.security import hash_password
 from bot.web.app import app
 from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
@@ -71,11 +72,12 @@ def mock_get_all_users():
         yield
 
 
-def _make_user(telegram_id=100, name="Тест", role="user"):
+def _make_user(telegram_id=100, name="Тест", role="user", password_hash=None):
     user = MagicMock()
     user.telegram_id = telegram_id
     user.name = name
     user.role = role
+    user.password_hash = password_hash
     return user
 
 
@@ -126,12 +128,11 @@ class TestLoginEndpoint:
     @patch("bot.web.auth.settings")
     def test_login_success(self, mock_settings, client):
         """Successful login sets session cookie."""
-        mock_settings.web_password = "correct-password"
         mock_settings.env = Environment.test
         mock_settings.web_root_path = ""
         mock_settings.admin_telegram_id = None
 
-        user = _make_user(100, "Иван", "user")
+        user = _make_user(100, "Иван", "user", password_hash=hash_password("correct-password"))
         with (
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
             patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=[user])),
@@ -150,14 +151,14 @@ class TestLoginEndpoint:
     @patch("bot.web.auth.settings")
     def test_login_wrong_password(self, mock_settings, client):
         """Wrong password shows error."""
-        mock_settings.web_password = "correct-password"
         mock_settings.web_root_path = ""
         mock_settings.env = "test"
 
-        users = [_make_user(100, "Иван")]
+        user = _make_user(100, "Иван", password_hash=hash_password("correct-password"))
         with (
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
-            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=[user])),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
             response = client.post(
                 "/login",
@@ -169,15 +170,15 @@ class TestLoginEndpoint:
 
     @patch("bot.web.auth.settings")
     def test_login_no_password_configured(self, mock_settings, client):
-        """Shows error when WEB_PASSWORD not set."""
-        mock_settings.web_password = ""
+        """Shows error when user has no password set."""
         mock_settings.web_root_path = ""
         mock_settings.env = "test"
 
-        users = [_make_user(100, "Иван")]
+        user = _make_user(100, "Иван", password_hash=None)
         with (
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
-            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=[user])),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
             response = client.post(
                 "/login",
@@ -185,19 +186,19 @@ class TestLoginEndpoint:
             )
 
         assert response.status_code == 200
-        assert "WEB_PASSWORD" in response.text
+        assert "не установлен" in response.text
 
     @patch("bot.web.auth.settings")
     def test_rate_limiting(self, mock_settings, client):
         """Rate limits login attempts."""
-        mock_settings.web_password = "correct-password"
         mock_settings.web_root_path = ""
         mock_settings.env = "test"
 
-        users = [_make_user(100, "Иван")]
+        user = _make_user(100, "Иван", password_hash=hash_password("correct-password"))
         with (
             patch("bot.web.auth.get_db_session", side_effect=_mock_db_session_ctx),
-            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=users)),
+            patch("bot.web.auth.get_all_users", new=AsyncMock(return_value=[user])),
+            patch("bot.web.auth.get_user_by_telegram_id", new=AsyncMock(return_value=user)),
         ):
             # Make 5 failed attempts
             for _ in range(5):

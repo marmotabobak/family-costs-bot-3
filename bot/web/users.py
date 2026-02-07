@@ -11,12 +11,15 @@ from sqlalchemy.exc import IntegrityError
 from bot.config import settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.users import (
+    count_admins,
     create_user,
     delete_user,
     get_all_users,
     get_user_by_id,
     update_user,
+    update_user_password,
 )
+from bot.security import hash_password
 from bot.web.auth import (
     get_csrf_token,
     get_current_user_name,
@@ -125,6 +128,7 @@ async def add_user(
     name: str = Form(...),
     telegram_id: str = Form(...),
     role: str = Form("user"),
+    password: str = Form(...),
     csrf_token: str = Form(""),
 ):
     """Handle add user form submission. Admin only."""
@@ -154,9 +158,14 @@ async def add_user(
     if role not in VALID_ROLES:
         return _render_form_error(request, "Некорректная роль", None, form_data)
 
+    # Validate password
+    if len(password) < 4:
+        return _render_form_error(request, "Пароль должен быть не менее 4 символов", None, form_data)
+
     async with get_db_session() as session:
         try:
-            user = await create_user(session, telegram_id=telegram_id_int, name=name.strip())
+            hashed = hash_password(password)
+            user = await create_user(session, telegram_id=telegram_id_int, name=name.strip(), password_hash=hashed)
             user.role = role  # type: ignore[assignment]
             await session.commit()
             logger.info("Added user telegram_id=%d, name=%s, role=%s", telegram_id_int, name, role)
@@ -205,6 +214,7 @@ async def edit_user(
     name: str = Form(...),
     telegram_id: str = Form(...),
     role: str = Form("user"),
+    new_password: str = Form(""),
     csrf_token: str = Form(""),
 ):
     """Handle edit user form submission. Admin only."""
@@ -238,13 +248,30 @@ async def edit_user(
     if role not in VALID_ROLES:
         return _render_form_error(request, "Некорректная роль", existing_user, form_data)
 
+    # Validate password if provided
+    if new_password and len(new_password) < 4:
+        return _render_form_error(request, "Пароль должен быть не менее 4 символов", existing_user, form_data)
+
     async with get_db_session() as session:
         try:
+            # Check last admin protection before demotion
+            if existing_user and existing_user.role == "admin" and role != "admin":
+                admin_count = await count_admins(session)
+                if admin_count <= 1:
+                    return _render_form_error(
+                        request, "Нельзя снять роль администратора у единственного администратора", existing_user, form_data
+                    )
+
             updated = await update_user(
                 session, user_id, telegram_id=telegram_id_int, name=name.strip(), role=role
             )
             if not updated:
                 raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+            # Update password if provided
+            if new_password:
+                await update_user_password(session, user_id, hash_password(new_password))
+
             await session.commit()
             logger.info("Updated user #%d: telegram_id=%d, name=%s, role=%s", user_id, telegram_id_int, name, role)
         except IntegrityError:
@@ -279,6 +306,17 @@ async def delete_user_route(
 
     async with get_db_session() as session:
         try:
+            # Check if this is the last admin
+            user_to_delete = await get_user_by_id(session, user_id)
+            if not user_to_delete:
+                raise HTTPException(status_code=404, detail="Пользователь не найден")
+
+            if user_to_delete.role == "admin":
+                admin_count = await count_admins(session)
+                if admin_count <= 1:
+                    set_flash_message(request, "Нельзя удалить единственного администратора", "error")
+                    return RedirectResponse(url=f"{settings.web_root_path}/users", status_code=303)
+
             deleted = await delete_user(session, user_id)
             if not deleted:
                 raise HTTPException(status_code=404, detail="Пользователь не найден")
