@@ -1,9 +1,8 @@
 """Tests for scripts/config.py."""
 
 import importlib.util
-import sys
 from pathlib import Path
-from unittest.mock import AsyncMock, call, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,6 +11,7 @@ _spec = importlib.util.spec_from_file_location(
     "config_script",
     Path(__file__).resolve().parent.parent.parent / "scripts" / "config.py",
 )
+assert _spec is not None
 config_mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(config_mod)  # type: ignore[union-attr]
 
@@ -94,7 +94,7 @@ class TestUpdateEnvFile:
         f = tmp_path / ".env"
         f.write_text("FOO=old\n")
         config_mod.update_env_file(f, {"FOO": "new"})
-        lines = [l for l in f.read_text().splitlines() if l.startswith("FOO=")]
+        lines = [line for line in f.read_text().splitlines() if line.startswith("FOO=")]
         assert len(lines) == 1
 
 
