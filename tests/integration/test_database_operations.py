@@ -302,6 +302,56 @@ class TestDeleteMessages:
             assert "A" not in texts
             assert "B" not in texts
 
+    @pytest.mark.asyncio
+    async def test_delete_with_empty_ids_list(self):
+        """Удаление с пустым списком ID возвращает 0 и не падает."""
+        user_id = 301
+
+        async with get_session() as session:
+            await save_message(session, user_id, "Safe")
+            await session.commit()
+
+        async with get_session() as session:
+            deleted = await delete_messages_by_ids(session, [], user_id)
+            await session.commit()
+
+        assert deleted == 0
+
+        async with get_session() as session:
+            msgs = (await session.execute(select(Message).where(Message.user_id == user_id))).scalars().all()
+            assert len(msgs) == 1
+
+    @pytest.mark.asyncio
+    async def test_delete_with_nonexistent_ids(self):
+        """Удаление несуществующих ID возвращает 0."""
+        user_id = 302
+
+        async with get_session() as session:
+            deleted = await delete_messages_by_ids(session, [999999, 888888], user_id)
+            await session.commit()
+
+        assert deleted == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_with_wrong_user_id_does_not_delete(self):
+        """Удаление чужих сообщений по неправильному user_id не удаляет ничего."""
+        owner_id = 303
+        attacker_id = 304
+
+        async with get_session() as session:
+            m = await save_message(session, owner_id, "Private")
+            await session.commit()
+
+        async with get_session() as session:
+            deleted = await delete_messages_by_ids(session, [int(m.id)], attacker_id)
+            await session.commit()
+
+        assert deleted == 0
+
+        async with get_session() as session:
+            msg = (await session.execute(select(Message).where(Message.user_id == owner_id))).scalar_one()
+            assert msg.text == "Private"
+
 
 class TestRepositoryFunctions:
     """Comprehensive tests for repository functions."""
