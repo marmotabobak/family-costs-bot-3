@@ -19,6 +19,7 @@
 9. [Error Handling Scenarios](#9-error-handling-scenarios)
 10. [Edge Cases & Boundary Testing](#10-edge-cases--boundary-testing)
 11. [Integration & E2E Scenarios](#11-integration--e2e-scenarios)
+12. [Setup Scripts Scenarios](#12-setup-scripts-scenarios)
 
 ---
 
@@ -657,11 +658,11 @@ This section describes real-world user workflows, what actions users can take, a
 | UC-4.3 | Other User's Expenses | Medium | ✅ Covered | `test_menu_handler.py` |
 | UC-4.4 | View Month Report | High | ✅ Covered | `test_menu_handler.py` |
 | UC-4.5 | Select Specific Month | Medium | ✅ Covered | `test_menu_handler.py` |
-| UC-6.1 | Undo Last Entry | High | ✅ Covered | `test_handle_message_e2e.py` |
-| UC-6.2 | Undo After Multiple Operations | Medium | ⚠️ Partial | Needs explicit test |
+| UC-6.1 | Undo Last Entry | High | ❌ Not Covered | Undo feature removed from current codebase |
+| UC-6.2 | Undo After Multiple Operations | Medium | ❌ Not Covered | Undo feature removed from current codebase |
 | UC-7.1 | Database Error | High | ✅ Covered | `test_messages_handler.py` |
 | UC-7.2 | Access Denied | High | ✅ Covered | `test_middleware.py` |
-| UC-7.3 | Message Too Long | Medium | ✅ Covered | `test_message_parser.py` |
+| UC-7.3 | Message Too Long | Medium | ✅ Covered | `test_message_parser.py` + `test_messages_handler.py::TestHandleMessageLimits` |
 | UC-8.1 | Complete Expense Management | High | ⚠️ Partial | Covered in parts |
 | UC-8.2 | Multi-User Workflow | High | ⚠️ Partial | Covered in isolation |
 | UC-8.3 | Correction Workflow | Medium | ✅ Covered | Multiple tests |
@@ -822,8 +823,8 @@ This section describes real-world user workflows, what actions users can take, a
 
 | Scenario | Status | Test Location | Notes |
 |----------|--------|---------------|-------|
-| HTML characters escaped in confirmation | ❌ Not Covered | | Test `<script>` tags |
-| HTML characters escaped in success | ❌ Not Covered | | Test `&`, `<`, `>` |
+| HTML characters escaped in confirmation | ✅ Covered | `test_messages_handler.py::TestHTMLEscaping` | `<script>`, `&`, `>`, `<` |
+| HTML characters escaped in success | ✅ Covered | `test_messages_handler.py::TestHTMLEscaping` | `<img>`, `&` |
 | Very long cost names in messages | ❌ Not Covered | | Test message truncation |
 
 ---
@@ -849,7 +850,7 @@ This section describes real-world user workflows, what actions users can take, a
 | Period keyboard has 4 buttons for own | ✅ Covered | `test_menu_handler.py::TestBuildPeriodKeyboard::test_has_four_buttons_for_own` | |
 | Period keyboard has 3 buttons for other | ✅ Covered | `test_menu_handler.py::TestBuildPeriodKeyboard::test_has_three_buttons_for_other` | |
 | "Этот месяц" shows current month report | ✅ Covered | `test_menu_handler.py::TestHandlePeriodSelection::test_this_month_shows_report` | |
-| "Прошлый месяц" shows previous month | ⚠️ Partial | Needs explicit test | Test January edge case |
+| "Прошлый месяц" shows previous month | ✅ Covered | `test_menu_handler.py::TestHandlePeriodSelection::test_prev_month_shows_report` + `test_prev_month_january_goes_to_december` | |
 | "Другие месяцы" shows months list | ✅ Covered | `test_menu_handler.py::TestHandlePeriodSelection::test_other_shows_months_list` | |
 
 ### 4.3 Month Selection
@@ -858,7 +859,7 @@ This section describes real-world user workflows, what actions users can take, a
 |----------|--------|---------------|-------|
 | Month selection shows report | ✅ Covered | `test_menu_handler.py::TestHandleMonthSelection::test_shows_month_report` | |
 | Months keyboard format | ✅ Covered | `test_menu_handler.py::TestBuildMonthsKeyboard` | |
-| Empty months list handling | ❌ Not Covered | | Test when no data available |
+| Empty months list handling | ✅ Covered | `test_menu_handler.py::TestBuildMonthsKeyboardEmpty::test_empty_months_returns_empty_keyboard` | |
 
 ### 4.4 Report Formatting
 
@@ -869,19 +870,19 @@ This section describes real-world user workflows, what actions users can take, a
 | Report with costs | ✅ Covered | `test_menu_handler.py::TestFormatMonthReport::test_report_with_costs` | |
 | Report total calculation | ✅ Covered | `test_menu_handler.py::TestFormatMonthReport::test_report_with_costs` | |
 | Report date formatting | ✅ Covered | `test_menu_handler.py::TestFormatMonthReport::test_report_with_costs` | |
-| Report with negative amounts | ❌ Not Covered | | Test corrections in report |
+| Report with negative amounts | ✅ Covered | `test_menu_handler.py::TestFormatMonthReport::test_report_with_negative_amount` | |
 | Report sorting by date | ⚠️ Partial | Covered in integration tests | Verify ascending order |
-| Report with expenses on same day | ❌ Not Covered | | Test multiple expenses same date |
+| Report with expenses on same day | ✅ Covered | `test_menu_handler.py::TestFormatMonthReport::test_report_with_same_day_expenses` | |
 
 ### 4.5 Period Edge Cases
 
 | Scenario | Status | Test Location | Notes |
 |----------|--------|---------------|-------|
-| "Прошлый месяц" in January | ❌ Not Covered | | Should show December previous year |
-| Invalid callback data format | ❌ Not Covered | | Test error handling |
-| Non-existent user_id in callback | ❌ Not Covered | | Test error handling |
-| Invalid year/month in callback | ❌ Not Covered | | Test error handling |
-| Year/month out of valid range | ❌ Not Covered | | Test boundary dates |
+| "Прошлый месяц" in January | ✅ Covered | `test_menu_handler.py::TestHandlePeriodSelection::test_prev_month_january_goes_to_december` | |
+| Invalid callback data format | ✅ Covered | `test_menu_handler.py::TestHandlePeriodSelection::test_invalid_format_returns_error` | |
+| Non-existent user_id in callback | ✅ Covered | `test_menu_handler.py::TestHandleUserCosts::test_invalid_user_id_shows_error` | |
+| Invalid year/month in callback | ✅ Covered | `test_menu_handler.py::TestHandleMonthSelection::test_invalid_year_returns_error` + `test_invalid_month_returns_error` | |
+| Year/month out of valid range | ❌ Not Covered | | e.g. month=13 would IndexError in MONTH_NAMES |
 
 ---
 
@@ -974,9 +975,9 @@ This section describes real-world user workflows, what actions users can take, a
 | Delete single message | ✅ Covered | `test_database_operations.py::TestDeleteMessages::test_delete_only_own_messages` | |
 | Delete multiple messages | ✅ Covered | `test_database_operations.py::TestDeleteMessages::test_delete_only_own_messages` | |
 | Delete only own messages | ✅ Covered | `test_database_operations.py::TestDeleteMessages::test_delete_only_own_messages` | |
-| Delete with empty IDs list | ❌ Not Covered | | Test edge case |
-| Delete with non-existent IDs | ❌ Not Covered | | Test partial deletion |
-| Delete with invalid user_id | ❌ Not Covered | | Test security |
+| Delete with empty IDs list | ✅ Covered | `test_database_operations.py::TestDeleteMessages::test_delete_with_empty_ids_list` | |
+| Delete with non-existent IDs | ✅ Covered | `test_database_operations.py::TestDeleteMessages::test_delete_with_nonexistent_ids` | |
+| Delete with invalid user_id | ✅ Covered | `test_database_operations.py::TestDeleteMessages::test_delete_with_wrong_user_id_does_not_delete` | |
 
 ### 7.3 Query Operations
 
@@ -1038,7 +1039,7 @@ This section describes real-world user workflows, what actions users can take, a
 
 | Scenario | Status | Test Location | Notes |
 |----------|--------|---------------|-------|
-| Very large user_id | ❌ Not Covered | | Test boundary |
+| Very large user_id | ✅ Covered | `test_middleware.py::TestAllowedUsersMiddleware::test_allows_very_large_telegram_user_id` | 64-bit Telegram IDs |
 | Negative user_id in config | ❌ Not Covered | | Test parsing |
 | Zero user_id | ❌ Not Covered | | Test edge case |
 | Malformed allowed_user_ids string | ❌ Not Covered | | Test config parsing |
@@ -1062,17 +1063,17 @@ This section describes real-world user workflows, what actions users can take, a
 
 | Scenario | Status | Test Location | Notes |
 |----------|--------|---------------|-------|
-| MessageMaxLengthExceed exception | ✅ Covered | `test_messages_handler.py` + parser tests | |
-| MessageMaxLinesCountExceed exception | ✅ Covered | `test_messages_handler.py` + parser tests | |
-| MessageMaxLineLengthExceed exception | ✅ Covered | `test_messages_handler.py` + parser tests | |
+| MessageMaxLengthExceed exception | ✅ Covered | `test_messages_handler.py::TestHandleMessageLimits::test_message_too_long_sends_error` + parser tests | |
+| MessageMaxLinesCountExceed exception | ✅ Covered | `test_messages_handler.py::TestHandleMessageLimits::test_too_many_lines_sends_error` + parser tests | |
+| MessageMaxLineLengthExceed exception | ✅ Covered | `test_messages_handler.py::TestHandleMessageLimits::test_line_too_long_sends_error` + parser tests | |
 | InvalidOperation exception | ✅ Covered | `test_message_parser.py::TestParseMessageDecimalError` | |
 
 ### 9.3 State Management Errors
 
 | Scenario | Status | Test Location | Notes |
 |----------|--------|---------------|-------|
-| Missing valid_costs in state | ⚠️ Partial | Covered in confirm handler | Needs explicit test |
-| Missing last_saved_ids in undo | ✅ Covered | `test_messages_handler.py::TestHandleUndo::test_undo_without_ids` | |
+| Missing valid_costs in state | ✅ Covered | `test_messages_handler.py::TestHandleConfirmEmptyState::test_confirm_with_no_costs_in_state` | |
+| Missing last_saved_ids in undo | ❌ Not Covered | | Undo feature removed from current codebase |
 | Expired state handling | ❌ Not Covered | | Test state timeout |
 | State conflicts (multiple operations) | ❌ Not Covered | | Test concurrent state |
 
@@ -1154,6 +1155,86 @@ This section describes real-world user workflows, what actions users can take, a
 
 ---
 
+## 12. Setup Scripts Scenarios
+
+Tests for `scripts/config.py` — the interactive setup tool invoked via `make env` and `make admin`.
+All tests are unit tests (no external dependencies) located at `tests/unit/test_config_script.py`.
+
+### 12.1 `.env` File Parsing (`load_env`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Parses key=value pairs | ✅ Covered | `TestLoadEnv::test_parses_key_value_pairs` |
+| Ignores comment lines | ✅ Covered | `TestLoadEnv::test_ignores_comment_lines` |
+| Ignores empty lines | ✅ Covered | `TestLoadEnv::test_ignores_empty_lines` |
+| Value containing `=` sign | ✅ Covered | `TestLoadEnv::test_value_containing_equals` |
+| Empty value | ✅ Covered | `TestLoadEnv::test_empty_value` |
+| Strips whitespace from key | ✅ Covered | `TestLoadEnv::test_strips_whitespace_from_key` |
+
+### 12.2 `.env` File Writing (`update_env_file`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Replaces existing key in-place | ✅ Covered | `TestUpdateEnvFile::test_replaces_existing_key` |
+| Appends missing key | ✅ Covered | `TestUpdateEnvFile::test_appends_missing_key` |
+| Preserves comments and blank lines | ✅ Covered | `TestUpdateEnvFile::test_preserves_comments_and_blank_lines` |
+| Replaces multiple keys | ✅ Covered | `TestUpdateEnvFile::test_replaces_multiple_keys` |
+| Creates file when it does not exist | ✅ Covered | `TestUpdateEnvFile::test_creates_file_when_not_exists` |
+| Does not duplicate an existing key | ✅ Covered | `TestUpdateEnvFile::test_does_not_duplicate_existing_key` |
+
+### 12.3 `DATABASE_URL` Construction (`build_database_url`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Builds correct URL from full env | ✅ Covered | `TestBuildDatabaseUrl::test_builds_correct_url` |
+| Uses defaults for missing keys | ✅ Covered | `TestBuildDatabaseUrl::test_uses_defaults_for_missing_keys` |
+| Password with special characters | ✅ Covered | `TestBuildDatabaseUrl::test_password_with_special_chars` |
+
+### 12.4 Validating an Existing `.env` (`_validate_env`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Does nothing when all keys present | ✅ Covered | `TestValidateEnv::test_does_nothing_when_complete` |
+| Reports missing keys | ✅ Covered | `TestValidateEnv::test_reports_missing_keys` |
+| Updates file with collected values | ✅ Covered | `TestValidateEnv::test_updates_file_with_collected_value` |
+| Rebuilds `DATABASE_URL` when PG key is missing | ✅ Covered | `TestValidateEnv::test_rebuilds_database_url_when_pg_key_missing` |
+| Prints confirmation after update | ✅ Covered | `TestValidateEnv::test_prints_updated_when_keys_added` |
+
+### 12.5 Creating a New `.env` (`_create_env`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Creates file with all prompted values | ✅ Covered | `TestCreateEnv::test_creates_file_with_all_values` |
+| `DATABASE_URL` built from PG values | ✅ Covered | `TestCreateEnv::test_database_url_built_from_pg_values` |
+| Retries on invalid bot token format | ✅ Covered | `TestCreateEnv::test_retries_on_invalid_bot_token` |
+| Retries on non-numeric admin Telegram ID | ✅ Covered | `TestCreateEnv::test_retries_on_non_numeric_admin_id` |
+| Prints next-step instructions after creation | ✅ Covered | `TestCreateEnv::test_prints_next_steps` |
+
+### 12.6 `make env` Entry Point (`cmd_env`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Calls `_create_env` when no `.env` exists | ✅ Covered | `TestCmdEnv::test_calls_create_env_when_no_file` |
+| Calls `_validate_env` when `.env` exists | ✅ Covered | `TestCmdEnv::test_calls_validate_env_when_file_exists` |
+
+### 12.7 `make admin` Entry Point (`cmd_admin`)
+
+| Scenario | Status | Test Location |
+|----------|--------|---------------|
+| Exits when `.env` not found | ✅ Covered | `TestCmdAdmin::test_exits_when_no_env_file` |
+| Exits when `DATABASE_URL` missing | ✅ Covered | `TestCmdAdmin::test_exits_when_database_url_missing` |
+| Exits when `ADMIN_TELEGRAM_ID` missing | ✅ Covered | `TestCmdAdmin::test_exits_when_admin_telegram_id_missing` |
+| Exits when `ADMIN_TELEGRAM_ID` not numeric | ✅ Covered | `TestCmdAdmin::test_exits_when_admin_telegram_id_not_numeric` |
+| Reports existing admin user | ✅ Covered | `TestCmdAdmin::test_reports_existing_admin` |
+| Reports admin not found | ✅ Covered | `TestCmdAdmin::test_reports_admin_not_found` |
+| Skips creation when user declines | ✅ Covered | `TestCmdAdmin::test_skips_creation_when_declined` |
+| Creates admin when user confirms | ✅ Covered | `TestCmdAdmin::test_creates_admin_when_confirmed` |
+| Uses `ADMIN_DEFAULT_PASSWORD` as password default | ✅ Covered | `TestCmdAdmin::test_uses_default_password_from_env` |
+| Exits on database connection error | ✅ Covered | `TestCmdAdmin::test_exits_on_db_connection_error` |
+| Exits on insert failure | ✅ Covered | `TestCmdAdmin::test_exits_on_insert_failure` |
+
+---
+
 ## Summary Statistics
 
 ### Coverage by Category
@@ -1161,54 +1242,51 @@ This section describes real-world user workflows, what actions users can take, a
 | Category | Covered | Partial | Not Covered | Total | Coverage % |
 |----------|---------|--------|-------------|-------|------------|
 | Message Parsing | 45 | 0 | 0 | 45 | 100% |
-| Message Handling | 12 | 3 | 5 | 20 | 60% |
-| Menu & Reports | 15 | 3 | 8 | 26 | 58% |
+| Message Handling | 15 | 2 | 3 | 20 | 75% |
+| Menu & Reports | 23 | 1 | 2 | 26 | 88% |
 | Past Mode | 10 | 2 | 6 | 18 | 56% |
 | Undo Operation | 4 | 0 | 6 | 10 | 40% |
-| Database Operations | 25 | 2 | 8 | 35 | 71% |
-| Access Control | 6 | 0 | 5 | 11 | 55% |
-| Error Handling | 8 | 1 | 6 | 15 | 53% |
+| Database Operations | 28 | 2 | 5 | 35 | 80% |
+| Access Control | 7 | 0 | 4 | 11 | 64% |
+| Error Handling | 9 | 0 | 6 | 15 | 60% |
 | Edge Cases | 8 | 2 | 4 | 14 | 57% |
 | Integration & E2E | 12 | 4 | 0 | 16 | 75% |
-| **TOTAL** | **145** | **17** | **48** | **210** | **69%** |
+| Setup Scripts | 38 | 0 | 0 | 38 | 100% |
+| **TOTAL** | **199** | **13** | **36** | **248** | **80%** |
 
 ### Priority Areas for Testing
 
 #### High Priority (Critical Functionality)
 1. **Undo Operation Edge Cases** (40% coverage)
-   - Undo with non-existent IDs
-   - Undo with mixed ownership
-   - Undo after database error
+   - Undo feature appears removed from current codebase — tests referencing `TestHandleUndo` do not exist
+   - If undo is re-added: test with non-existent IDs, mixed ownership, DB error during delete
 
 2. **Past Mode Edge Cases** (56% coverage)
    - Invalid year/month handling
    - Past mode disabled mid-transaction
    - Edge dates (1900, 2100)
 
-3. **Error Handling** (53% coverage)
-   - SQLAlchemyError during undo
-   - Connection lost scenarios
-   - State timeout handling
+3. **Error Handling** (60% coverage)
+   - Connection lost during operation
+   - Transaction timeout
+   - State timeout/expiry
 
 #### Medium Priority (Important Functionality)
-1. **Menu & Reports** (58% coverage)
-   - Empty months list handling
-   - Report with negative amounts
-   - Period edge cases (January)
+1. **Message Handling** (75% coverage)
+   - Past mode persistence across messages
+   - Very long cost names in rendered messages
 
-2. **Message Handling** (60% coverage)
-   - HTML escaping in messages
-   - Past mode persistence
-   - Very long cost names
-
-3. **Access Control Edge Cases** (55% coverage)
+2. **Access Control Edge Cases** (64% coverage)
    - Malformed config handling
    - Concurrent access checks
+
+3. **Menu & Reports** (88% coverage)
+   - Year/month out of valid range (e.g. month=13 → IndexError in MONTH_NAMES)
 
 #### Low Priority (Nice to Have)
 1. **Concurrent Operations**
    - Concurrent menu operations
-   - Concurrent undo operations
+   - Concurrent undo operations (if feature returns)
 
 2. **Performance Testing**
    - Load testing
@@ -1246,6 +1324,7 @@ Test locations reference:
 - `test_messages_handler.py` - Unit tests for message handlers
 - `test_menu_handler.py` - Unit tests for menu handlers
 - `test_middleware.py` - Unit tests for middleware
+- `test_config_script.py` - Unit tests for `scripts/config.py` (make env / make admin)
 - `test_database_operations.py` - Integration tests for database
 - `test_handle_message_e2e.py` - E2E tests for message handling
 - `test_telegram_api_integration.py` - Integration tests for Telegram API

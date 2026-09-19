@@ -142,3 +142,29 @@ class TestAllowedUsersMiddleware:
 
             assert "Access denied" in caplog.text
             assert "123456" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_allows_very_large_telegram_user_id(self, middleware, handler):
+        """Telegram использует 64-битные user_id — большие ID обрабатываются корректно."""
+        from aiogram.types import Message, User
+
+        large_id = 7_000_000_000  # > 2^32, реальный диапазон Telegram
+
+        user = MagicMock(spec=User)
+        user.id = large_id
+        user.username = "biguser"
+
+        message = MagicMock(spec=Message)
+        message.from_user = user
+        message.answer = AsyncMock()
+
+        with patch("bot.middleware.get_db_session") as mock_session_ctx, patch(
+            "bot.middleware.get_all_telegram_ids", new=AsyncMock(return_value=[large_id])
+        ):
+            mock_session_ctx.return_value = self._mock_get_session([large_id])()
+
+            result = await middleware(handler, message, {})
+
+            handler.assert_called_once_with(message, {})
+            assert result == "handler_result"
+            message.answer.assert_not_called()

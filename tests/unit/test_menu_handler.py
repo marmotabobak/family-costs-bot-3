@@ -154,6 +154,42 @@ class TestFormatMonthReport:
         assert "20: Транспорт 50.50" in report
         assert "2: \\-.!#_@:`<>/ 12.34" in report
 
+    def test_report_with_negative_amount(self):
+        """Отрицательная сумма (корректировка) отображается корректно."""
+        costs = [
+            ("Продукты", Decimal("200"), datetime(2024, 1, 10)),
+            ("корректировка", Decimal("-50"), datetime(2024, 1, 11)),
+        ]
+        report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
+
+        assert "корректировка" in report
+        assert "-50" in report
+        assert "<b>Всего:</b> 150" in report
+
+    def test_report_with_same_day_expenses(self):
+        """Несколько расходов в один день — все отображаются."""
+        costs = [
+            ("Кофе", Decimal("100"), datetime(2024, 1, 15, 9, 0)),
+            ("Обед", Decimal("250"), datetime(2024, 1, 15, 13, 0)),
+        ]
+        report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
+
+        lines = report.splitlines()
+        day_lines = [line for line in lines if line.startswith("15:")]
+        assert len(day_lines) == 2
+        assert any("Кофе" in line for line in day_lines)
+        assert any("Обед" in line for line in day_lines)
+
+
+class TestBuildMonthsKeyboardEmpty:
+    """Тест построения клавиатуры без доступных месяцев."""
+
+    def test_empty_months_returns_empty_keyboard(self):
+        """Пустой список месяцев → клавиатура без кнопок."""
+        keyboard = build_months_keyboard(user_id=123, available_months=[])
+
+        assert len(keyboard.inline_keyboard) == 0
+
 
 class TestMenuCommand:
     """Тесты команды /menu."""

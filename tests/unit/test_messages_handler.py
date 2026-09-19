@@ -194,3 +194,105 @@ class TestHandleCancel:
 
         mock_state.clear.assert_called_once()
         cb.message.edit_text.assert_called_once()
+
+
+# ======================================================
+# handle_message — message limit exceptions
+# ======================================================
+
+class TestHandleMessageLimits:
+    @pytest.mark.asyncio
+    async def test_message_too_long_sends_error(self, mock_message, mock_state):
+        from bot.exceptions import MessageMaxLengthExceed
+        from bot.constants import MSG_MESSAGE_MAX_LENGTH
+
+        with patch("bot.routers.messages.parse_message", side_effect=MessageMaxLengthExceed()):
+            await handle_message(mock_message, mock_state)
+
+        mock_message.answer.assert_called_once_with(MSG_MESSAGE_MAX_LENGTH)
+
+    @pytest.mark.asyncio
+    async def test_too_many_lines_sends_error(self, mock_message, mock_state):
+        from bot.exceptions import MessageMaxLinesCountExceed
+        from bot.constants import MSG_MESSAGE_MAX_LINES_COUNT
+
+        with patch("bot.routers.messages.parse_message", side_effect=MessageMaxLinesCountExceed()):
+            await handle_message(mock_message, mock_state)
+
+        mock_message.answer.assert_called_once_with(MSG_MESSAGE_MAX_LINES_COUNT)
+
+    @pytest.mark.asyncio
+    async def test_line_too_long_sends_error(self, mock_message, mock_state):
+        from bot.exceptions import MessageMaxLineLengthExceed
+        from bot.constants import MSG_MESSAGE_MAX_LINE_LENGTH
+
+        offending_line = "a" * 30
+        with patch(
+            "bot.routers.messages.parse_message",
+            side_effect=MessageMaxLineLengthExceed(offending_line),
+        ):
+            await handle_message(mock_message, mock_state)
+
+        call_text = mock_message.answer.call_args[0][0]
+        assert MSG_MESSAGE_MAX_LINE_LENGTH in call_text
+
+
+# ======================================================
+# HTML escaping
+# ======================================================
+
+class TestHTMLEscaping:
+    def test_confirmation_message_escapes_html_in_cost_name(self):
+        msg = format_confirmation_message(
+            [Cost("<script>alert(1)</script>", Decimal("100"))],
+            ["bad line"],
+        )
+        assert "<script>" not in msg
+        assert "&lt;script&gt;" in msg
+
+    def test_confirmation_message_escapes_ampersand_in_cost_name(self):
+        msg = format_confirmation_message(
+            [Cost("хлеб & молоко", Decimal("50"))],
+            ["bad"],
+        )
+        assert "& молоко" not in msg
+        assert "&amp; молоко" in msg
+
+    def test_confirmation_message_escapes_html_in_invalid_line(self):
+        msg = format_confirmation_message(
+            [Cost("A", Decimal("1"))],
+            ["<b>bad</b> line"],
+        )
+        assert "<b>bad</b>" not in msg
+        assert "&lt;b&gt;bad&lt;/b&gt;" in msg
+
+    def test_success_message_escapes_html_in_cost_name(self):
+        msg = format_success_message([Cost("<img src=x>", Decimal("99"))])
+        assert "<img" not in msg
+        assert "&lt;img" in msg
+
+    def test_success_message_escapes_ampersand(self):
+        msg = format_success_message([Cost("кофе & чай", Decimal("200"))])
+        assert "кофе & чай" not in msg
+        assert "&amp;" in msg
+
+
+# ======================================================
+# handle_confirm — empty state
+# ======================================================
+
+class TestHandleConfirmEmptyState:
+    @pytest.mark.asyncio
+    async def test_confirm_with_no_costs_in_state(self, mock_state):
+        cb = MagicMock()
+        cb.from_user.id = 123
+        cb.answer = AsyncMock()
+        cb.message = MagicMock(spec=Message)
+        cb.message.edit_text = AsyncMock()
+
+        mock_state.get_data.return_value = {}
+
+        await handle_confirm(cb, mock_state)
+
+        cb.answer.assert_called_once_with("Нет данных")
+        mock_state.clear.assert_called_once()
