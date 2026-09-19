@@ -13,6 +13,16 @@ TESTS := tests
 # Development environment
 # -----------------------------------------------------------
 
+## Create or validate .env interactively (no DB required)
+.PHONY: env
+env:
+	$(PYTHON) scripts/config.py env
+
+## Check whether admin user exists in DB and create if not
+.PHONY: admin
+admin:
+	$(PYTHON) scripts/config.py admin
+
 ## Install only PROD dependencies
 .PHONY: install
 install:
@@ -134,6 +144,8 @@ help:
 	@echo "Available commands:"
 	@echo ""
 	@echo "  Development:"
+	@echo "    make env           - create or validate .env interactively (no DB required)"
+	@echo "    make admin         - check/create admin user in the database"
 	@echo "    make install       - install production dependencies"
 	@echo "    make install-dev   - install production + dev dependencies"
 	@echo "    make db            - start postgres only (for local dev)"
