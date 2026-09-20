@@ -23,6 +23,7 @@ dev = [
     "pytest~=9.0.0",
     "pytest-asyncio~=1.3.0",
     "pytest-cov~=7.0.0",
+    "pytest-xdist~=3.0",
     "mypy~=1.19.0",
     "ruff~=0.14.0",
     "alembic~=1.17.0",
@@ -111,6 +112,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "slow: Slow tests — mock-heavy or rarely broken, run in full CI only",
+    "serial: Tests that must not run in parallel (shared in-memory state or real DB without row isolation)",
 ]
 
 # ============================================================================

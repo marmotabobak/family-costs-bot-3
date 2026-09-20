@@ -125,6 +125,22 @@ test-cov:
 	       --cov-report=html \
 	       --cov-report=xml
 
+## Run only serial tests (shared state / real DB — must not run in parallel)
+.PHONY: test-serial
+test-serial:
+	pytest -vv -m serial
+
+## Run only parallel-safe tests using all available CPU cores
+.PHONY: test-parallel
+test-parallel:
+	pytest -vv -m "not serial" -n auto
+
+## Run parallel-safe tests first (in parallel), then serial tests sequentially
+.PHONY: test-hybrid
+test-hybrid:
+	pytest -vv -m "not serial" -n auto
+	pytest -vv -m serial
+
 # -----------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------
@@ -169,7 +185,10 @@ help:
 	@echo "    make pre-commit    - run pre-commit hooks"
 	@echo ""
 	@echo "  Testing:"
-	@echo "    make test          - run pytest"
+	@echo "    make test          - run all tests sequentially"
+	@echo "    make test-serial   - run only serial tests (shared state / real DB)"
+	@echo "    make test-parallel - run only parallel-safe tests (uses all CPU cores)"
+	@echo "    make test-hybrid   - parallel-safe tests first, then serial tests"
 	@echo "    make test-cov      - run tests with coverage"
 	@echo ""
 	@echo "  Helpers:"

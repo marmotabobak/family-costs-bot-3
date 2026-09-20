@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from bot.web.auth import (
     SESSION_LIFETIME,
     auth_sessions,
@@ -29,6 +31,8 @@ from bot.web.costs import (
     _apply_filters,
     parse_message_to_cost,
 )
+
+pytestmark = pytest.mark.serial
 
 
 class TestParsedCostDataclass:

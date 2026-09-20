@@ -17,6 +17,8 @@ from bot.security import hash_password
 from bot.web.app import app
 from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
+pytestmark = pytest.mark.serial
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

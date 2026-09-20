@@ -11,6 +11,8 @@ from bot.security import hash_password
 from bot.web.app import app
 from bot.web.auth import SESSION_COOKIE, auth_sessions
 
+pytestmark = pytest.mark.serial
+
 
 def _make_user(id=1, telegram_id=123, name="Иван", role="user", password_hash=None):
     user = MagicMock()

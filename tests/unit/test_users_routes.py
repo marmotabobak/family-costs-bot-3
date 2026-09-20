@@ -9,6 +9,8 @@ from httpx import ASGITransport, AsyncClient
 from bot.web.app import app
 from bot.web.auth import auth_sessions
 
+pytestmark = pytest.mark.serial
+
 
 def _make_user(id=1, telegram_id=123, name="Иван", role="user"):
     user = MagicMock()
