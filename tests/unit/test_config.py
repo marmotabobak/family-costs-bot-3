@@ -145,37 +145,3 @@ class TestWebSettings:
             database_url="postgresql://user:pass@localhost/db",
         )
         assert settings.admin_default_password == "from-env"
-
-    def test_web_base_url_default(self):
-        """По умолчанию базовый URL localhost:8000."""
-
-        class SettingsWithNoEnv(Settings):
-            model_config = SettingsConfigDict(env_file=None)
-
-        settings = SettingsWithNoEnv(
-            bot_token="123456789:ABCdefGHIjkl",
-            database_url="postgresql://user:pass@localhost/db",
-        )
-        assert settings.web_base_url == "http://localhost:8000"
-
-    def test_web_base_url_from_value(self):
-        """Базовый URL принимается явно."""
-        settings = Settings(
-            bot_token="123456789:ABCdefGHIjkl",
-            database_url="postgresql://user:pass@localhost/db",
-            web_base_url="https://example.com",
-        )
-        assert settings.web_base_url == "https://example.com"
-
-    def test_web_base_url_from_env(self, monkeypatch):
-        """Базовый URL читается из переменной окружения WEB_BASE_URL."""
-
-        class SettingsWithNoEnv(Settings):
-            model_config = SettingsConfigDict(env_file=None)
-
-        monkeypatch.setenv("WEB_BASE_URL", "https://prod.example.com")
-        settings = SettingsWithNoEnv(
-            bot_token="123456789:ABCdefGHIjkl",
-            database_url="postgresql://user:pass@localhost/db",
-        )
-        assert settings.web_base_url == "https://prod.example.com"

@@ -5,8 +5,6 @@ Auth sessions and import sessions are the real in-memory dicts, so cookie flow
 and CSRF validation are exercised end-to-end.
 """
 
-import io
-import json
 from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -16,7 +14,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import IntegrityError
 
 from bot.security import hash_password
-from bot.web.app import app, import_sessions
+from bot.web.app import app
 from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
 # ---------------------------------------------------------------------------
@@ -175,20 +173,6 @@ class FakeDB:
         return count
 
 
-SAMPLE_CHECKS = {
-    "checks": [
-        {
-            "store": "VkusVill Москва",
-            "date": "2026-01-15T10:30:00",
-            "items": [
-                {"name": "Молоко", "sum": 120.5},
-                {"name": "Хлеб", "sum": 85.0},
-            ],
-        }
-    ]
-}
-
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -210,7 +194,6 @@ def _cleanup_global_state():
     yield
     auth_sessions.clear()
     login_attempts.clear()
-    import_sessions.clear()
 
 
 @pytest.fixture
@@ -1001,132 +984,7 @@ class TestCostsCRUDJourney:
 
 
 # ===========================================================================
-# 4. Import Journey
-# ===========================================================================
-
-
-class TestImportJourney:
-    """Token-based VkusVill import flow."""
-
-    @pytest.mark.asyncio
-    async def test_full_import_flow(self):
-        """Happy path: create token → upload → select → save → success."""
-        with (
-            patch("bot.web.app.get_db_session", side_effect=_fake_session),
-            patch("bot.web.app.save_message", new=AsyncMock()),
-        ):
-            async with _client() as c:
-                # Generate import token
-                r = await c.get("/dev/create-token/42")
-                assert r.status_code == 200
-                token = r.json()["token"]
-
-                # Upload page accessible
-                r = await c.get(f"/import/{token}")
-                assert r.status_code == 200
-
-                # Upload JSON
-                payload = json.dumps(SAMPLE_CHECKS).encode("utf-8")
-                r = await c.post(
-                    f"/import/{token}/upload",
-                    files={"file": ("checks.json", io.BytesIO(payload), "application/json")},
-                    follow_redirects=False,
-                )
-                assert r.status_code == 303
-                assert "/select" in r.headers["location"]
-
-                # Select page lists items
-                r = await c.get(f"/import/{token}/select")
-                assert r.status_code == 200
-                assert "Молоко" in r.text
-                assert "Хлеб" in r.text
-
-                # Save both items
-                r = await c.post(
-                    f"/import/{token}/save",
-                    data={"items": ["0:0", "0:1"]},
-                )
-        assert r.status_code == 200
-        assert "2" in r.text  # saved_count shown on success page
-
-    @pytest.mark.asyncio
-    async def test_invalid_token_returns_404(self):
-        """All import sub-routes return 404 for an unknown token."""
-        async with _client() as c:
-            r = await c.get("/import/bad-token")
-            assert r.status_code == 404
-
-            r = await c.post(
-                "/import/bad-token/upload",
-                files={"file": ("x.json", io.BytesIO(b"{}"), "application/json")},
-            )
-            assert r.status_code == 404
-
-            r = await c.get("/import/bad-token/select")
-            assert r.status_code == 404
-
-            r = await c.post("/import/bad-token/save", data={})
-            assert r.status_code == 404
-
-    @pytest.mark.asyncio
-    async def test_select_before_upload_redirects(self):
-        """GET /select on a fresh token (no data uploaded) → redirect to upload."""
-        async with _client() as c:
-            r = await c.get("/dev/create-token/1")
-            token = r.json()["token"]
-
-            r = await c.get(f"/import/{token}/select", follow_redirects=False)
-        assert r.status_code == 307
-
-    @pytest.mark.asyncio
-    async def test_save_empty_selection_shows_error(self):
-        """POST /save with no items selected shows error on select page."""
-        async with _client() as c:
-            r = await c.get("/dev/create-token/1")
-            token = r.json()["token"]
-
-            # Upload first
-            payload = json.dumps(SAMPLE_CHECKS).encode("utf-8")
-            await c.post(
-                f"/import/{token}/upload",
-                files={"file": ("checks.json", io.BytesIO(payload), "application/json")},
-            )
-
-            # Save with no items
-            r = await c.post(f"/import/{token}/save", data={})
-        assert "Выберите хотя бы один товар" in r.text
-
-    @pytest.mark.asyncio
-    async def test_upload_invalid_json_shows_error(self):
-        """Non-JSON file content shows parse error on upload page."""
-        async with _client() as c:
-            r = await c.get("/dev/create-token/1")
-            token = r.json()["token"]
-
-            r = await c.post(
-                f"/import/{token}/upload",
-                files={"file": ("bad.json", io.BytesIO(b"not json at all"), "application/json")},
-            )
-        assert r.status_code == 200
-        assert "Ошибка чтения файла" in r.text
-
-    @pytest.mark.asyncio
-    async def test_upload_missing_checks_key_shows_error(self):
-        """Valid JSON without 'checks' key shows format error."""
-        async with _client() as c:
-            r = await c.get("/dev/create-token/1")
-            token = r.json()["token"]
-
-            payload = json.dumps({"other": []}).encode("utf-8")
-            r = await c.post(
-                f"/import/{token}/upload",
-                files={"file": ("bad.json", io.BytesIO(payload), "application/json")},
-            )
-        assert "Неверный формат файла" in r.text
-
-
-# ===========================================================================
-# 5. Security Scenarios
+# 4. Security Scenarios
 # ===========================================================================
 
 
@@ -1164,30 +1022,9 @@ class TestSecurityScenarios:
                 assert r.status_code == 303, f"{path} did not redirect"
                 assert "/login" in r.headers["location"], f"{path} bad redirect"
 
-    @pytest.mark.asyncio
-    async def test_import_token_isolation(self):
-        """Data uploaded via Token A is not visible through Token B."""
-        async with _client() as c:
-            r_a = await c.get("/dev/create-token/1")
-            token_a = r_a.json()["token"]
-
-            r_b = await c.get("/dev/create-token/2")
-            token_b = r_b.json()["token"]
-
-            # Upload to A
-            payload = json.dumps(SAMPLE_CHECKS).encode("utf-8")
-            await c.post(
-                f"/import/{token_a}/upload",
-                files={"file": ("c.json", io.BytesIO(payload), "application/json")},
-            )
-
-            # B has no data → select redirects back to upload
-            r = await c.get(f"/import/{token_b}/select", follow_redirects=False)
-        assert r.status_code == 307
-
 
 # ===========================================================================
-# 6. Navigation & Health
+# 5. Navigation & Health
 # ===========================================================================
 
 

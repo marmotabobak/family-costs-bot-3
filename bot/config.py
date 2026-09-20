@@ -15,7 +15,6 @@ class Settings(BaseSettings):
     database_url: str
     env: Environment = Environment.prod
     admin_telegram_id: int | None = None
-    web_base_url: str = "http://localhost:8000"
     admin_default_password: str = ""
     web_root_path: str = ""
 
