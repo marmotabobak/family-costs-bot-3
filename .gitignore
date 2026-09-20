@@ -56,3 +56,9 @@ build/
 
 # --- __local dev stuff__ ---
 *.sqlite
+
+# --- AI ---
+.claude/
+.agents/
+.codex/
+.playwright-mcp/

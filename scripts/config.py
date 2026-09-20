@@ -25,7 +25,6 @@ REQUIRED_KEYS = [
     "ENV",
     "ADMIN_TELEGRAM_ID",
     "ADMIN_DEFAULT_PASSWORD",
-    "WEB_BASE_URL",
     "WEB_PORT",
     "WEB_ROOT_PATH",
 ]
@@ -40,7 +39,6 @@ FIELD_META: dict[str, tuple[str, str | None, bool]] = {
     "ENV":                    ("Environment (dev/prod)", "prod", False),
     "ADMIN_TELEGRAM_ID":      ("Your Telegram numeric ID", None, False),
     "ADMIN_DEFAULT_PASSWORD": ("Password for web UI", None, True),
-    "WEB_BASE_URL":           ("WEB_BASE_URL", "http://localhost", False),
     "WEB_PORT":               ("WEB_PORT", "8000", False),
     "WEB_ROOT_PATH":          ("WEB_ROOT_PATH", "/family-costs-bot", False),
 }
@@ -165,7 +163,6 @@ def _create_env(env_file: Path) -> None:
     env["ADMIN_DEFAULT_PASSWORD"] = ask("Password for web UI", secret=True)
 
     print()
-    env["WEB_BASE_URL"] = ask("WEB_BASE_URL", default="http://localhost")
     env["WEB_PORT"] = ask("WEB_PORT", default="8000")
     env["WEB_ROOT_PATH"] = ask("WEB_ROOT_PATH", default="/family-costs-bot")
 
@@ -183,7 +180,6 @@ def _create_env(env_file: Path) -> None:
         f"ADMIN_TELEGRAM_ID={env['ADMIN_TELEGRAM_ID']}\n"
         f"ADMIN_DEFAULT_PASSWORD={env['ADMIN_DEFAULT_PASSWORD']}\n"
         f"\n"
-        f"WEB_BASE_URL={env['WEB_BASE_URL']}\n"
         f"WEB_PORT={env['WEB_PORT']}\n"
         f"WEB_ROOT_PATH={env['WEB_ROOT_PATH']}\n"
     )

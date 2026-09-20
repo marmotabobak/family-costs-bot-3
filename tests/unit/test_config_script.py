@@ -147,7 +147,6 @@ def _complete_env_text() -> str:
         "ENV=prod\n"
         "ADMIN_TELEGRAM_ID=12345\n"
         "ADMIN_DEFAULT_PASSWORD=secret\n"
-        "WEB_BASE_URL=http://localhost\n"
         "WEB_PORT=8000\n"
         "WEB_ROOT_PATH=/family-costs-bot\n"
     )
@@ -180,7 +179,6 @@ class TestValidateEnv:
             "DATABASE_URL=postgresql+asyncpg://postgres:pass@localhost:5432/mydb\n"
             "ENV=prod\n"
             "ADMIN_TELEGRAM_ID=12345\n"
-            "WEB_BASE_URL=http://localhost\n"
             "WEB_PORT=8000\n"
             "WEB_ROOT_PATH=/family-costs-bot\n"
         )
@@ -200,7 +198,6 @@ class TestValidateEnv:
             "ENV=prod\n"
             "ADMIN_TELEGRAM_ID=12345\n"
             "ADMIN_DEFAULT_PASSWORD=secret\n"
-            "WEB_BASE_URL=http://localhost\n"
             "WEB_PORT=8000\n"
             "WEB_ROOT_PATH=/family-costs-bot\n"
         )
@@ -235,13 +232,12 @@ def _patch_create_inputs(
     admin_tid="99999",
     admin_name="Admin",
     admin_pass="adminpass",
-    web_base_url="http://localhost",
     web_port="8000",
     web_root="/family-costs-bot",
 ):
     """Return a pair of patch context managers (getpass, input) for _create_env."""
     secrets = iter([token, pg_password, admin_pass])
-    plain = iter([pg_user, pg_db, pg_port, env, admin_tid, admin_name, web_base_url, web_port, web_root])
+    plain = iter([pg_user, pg_db, pg_port, env, admin_tid, admin_name, web_port, web_root])
     return (
         patch("getpass.getpass", side_effect=secrets),
         patch("builtins.input", side_effect=plain),
@@ -275,7 +271,7 @@ class TestCreateEnv:
         # Token must be ≥ 20 chars and contain ":"
         good_token = "1234567890:ABCDEFGHIJK"
         secrets = iter(["badtoken", good_token, "pgpass", "adminpass"])
-        plain = iter(["postgres", "mydb", "5432", "prod", "12345", "Admin", "http://localhost", "8000", "/bot"])
+        plain = iter(["postgres", "mydb", "5432", "prod", "12345", "Admin", "8000", "/bot"])
         with patch("getpass.getpass", side_effect=secrets), \
              patch("builtins.input", side_effect=plain):
             config_mod._create_env(env_file)
@@ -284,7 +280,7 @@ class TestCreateEnv:
     def test_retries_on_non_numeric_admin_id(self, tmp_path):
         env_file = tmp_path / ".env"
         secrets = iter(["1234567890:ABCDEFGHIJK", "pgpass", "adminpass"])
-        plain = iter(["postgres", "mydb", "5432", "prod", "not-a-number", "99999", "Admin", "http://localhost", "8000", "/bot"])
+        plain = iter(["postgres", "mydb", "5432", "prod", "not-a-number", "99999", "Admin", "8000", "/bot"])
         with patch("getpass.getpass", side_effect=secrets), \
              patch("builtins.input", side_effect=plain):
             config_mod._create_env(env_file)
