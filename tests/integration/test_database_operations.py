@@ -10,6 +10,8 @@ from bot.db.models import Message
 from bot.db.repositories.messages import save_message, delete_messages_by_ids
 from bot.services.message_parser import parse_message
 
+pytestmark = pytest.mark.serial
+
 
 class TestFullMessageFlow:
     """Тесты полного E2E flow."""

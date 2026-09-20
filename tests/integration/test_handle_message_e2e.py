@@ -10,6 +10,8 @@ from bot.db.dependencies import get_session
 from bot.db.models import Message
 from bot.routers.messages import handle_message
 
+pytestmark = pytest.mark.serial
+
 
 # ======================================================
 # Минимальные моки aiogram

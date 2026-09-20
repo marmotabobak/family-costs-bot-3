@@ -18,6 +18,8 @@ from bot.db.dependencies import get_session
 from bot.db.models import Message as DBMessage
 from bot.routers import common, messages
 
+pytestmark = pytest.mark.serial
+
 
 def create_test_update(
     update_id: int,
