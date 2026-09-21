@@ -152,8 +152,12 @@ async def promote_to_base(session: AsyncSession, currency_id: int) -> Currency:
     """Atomically promote *currency_id* to base, demoting the current base.
 
     Steps (within the same transaction / flush):
-    1. Set ``is_base=False`` on the current base (if any).
-    2. Set ``is_base=True`` and ``default_rate=1`` on the target currency.
+    1. Recalculate every other currency's ``default_rate`` relative to the new
+       base by dividing by the new base's current ``default_rate`` (``factor``).
+    2. Recalculate every dated ``ExchangeRate`` for non-target currencies the
+       same way.
+    3. Set ``is_base=False`` on the current base (if any).
+    4. Set ``is_base=True`` and ``default_rate=1`` on the target currency.
 
     Raises ``ValueError`` if *currency_id* does not exist.
     """
@@ -167,14 +171,28 @@ async def promote_to_base(session: AsyncSession, currency_id: int) -> Currency:
         # Already base — nothing to do
         return target
 
-    # Demote current base
+    factor = Decimal(str(target.default_rate))
+
+    # Recalculate default_rate for every currency except the new base
+    await session.execute(
+        update(Currency)
+        .where(Currency.id != currency_id)
+        .values(default_rate=Currency.default_rate / factor)
+    )
+
+    # Recalculate all dated exchange rates (they belong to non-base currencies,
+    # so none of them belong to the new base — no need to filter further)
+    await session.execute(
+        update(ExchangeRate)
+        .values(rate=ExchangeRate.rate / factor)
+    )
+
+    # Demote current base and promote target
     await session.execute(
         update(Currency)
         .where(Currency.is_base.is_(True))
         .values(is_base=False)
     )
-
-    # Promote target
     await session.execute(
         update(Currency)
         .where(Currency.id == currency_id)

@@ -184,6 +184,60 @@ class TestPromoteToBase:
             result = await promote_to_base(session, int(base.id))
         assert result.is_base is True
 
+    @pytest.mark.asyncio
+    async def test_promote_recalculates_default_rates(self):
+        """Changing base from RUB to EUR must scale all other default_rates."""
+        # RUB (base, rate=1), EUR (rate=100), USD (rate=90)
+        async with get_session() as session:
+            eur = await create_currency(session, "EUR", Decimal("100"))
+            usd = await create_currency(session, "USD", Decimal("90"))
+            await session.commit()
+            eur_id, usd_id = int(eur.id), int(usd.id)
+
+        async with get_session() as session:
+            await promote_to_base(session, eur_id)
+            await session.commit()
+
+        async with get_session() as session:
+            rub = await get_currency_by_code(session, "RUB")
+            usd = await get_currency_by_id(session, usd_id)
+            eur = await get_currency_by_id(session, eur_id)
+
+        assert eur.is_base is True
+        assert Decimal(str(eur.default_rate)) == Decimal("1")
+        # RUB: 1/100 = 0.01
+        assert Decimal(str(rub.default_rate)) == Decimal("1") / Decimal("100")
+        # USD: 90/100 = 0.9
+        assert Decimal(str(usd.default_rate)) == Decimal("90") / Decimal("100")
+
+    @pytest.mark.asyncio
+    async def test_promote_recalculates_dated_exchange_rates(self):
+        """Dated exchange rates are recalculated relative to the new base."""
+        async with get_session() as session:
+            eur = await create_currency(session, "EUR", Decimal("100"))
+            usd = await create_currency(session, "USD", Decimal("90"))
+            usd_rate = await create_exchange_rate(
+                session, int(usd.id), Decimal("95"), date(2026, 5, 10)
+            )
+            await session.commit()
+            eur_id = int(eur.id)
+            usd_rate_id = int(usd_rate.id)
+
+        async with get_session() as session:
+            await promote_to_base(session, eur_id)
+            await session.commit()
+
+        async with get_session() as session:
+            from sqlalchemy import select
+            from bot.db.models import ExchangeRate
+            result = await session.execute(
+                select(ExchangeRate).where(ExchangeRate.id == usd_rate_id)
+            )
+            updated_rate = result.scalar_one()
+
+        # 95 RUB per USD → 95/100 = 0.95 EUR per USD
+        assert Decimal(str(updated_rate.rate)) == Decimal("95") / Decimal("100")
+
 
 class TestDeleteCurrency:
     @pytest.mark.asyncio
