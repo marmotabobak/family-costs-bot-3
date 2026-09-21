@@ -326,6 +326,27 @@
     color: #3498db;
 }
 
+.text-muted {
+    color: #999;
+}
+
+.rate-inline-input {
+    width: 80px;
+    padding: 4px 8px;
+    display: inline-block;
+}
+
+.link-action {
+    font-size: 0.85rem;
+    color: #3498db;
+    text-decoration: none;
+    margin-left: 4px;
+}
+
+.link-action:hover {
+    text-decoration: underline;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
     .nav-links {

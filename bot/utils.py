@@ -15,6 +15,14 @@ def format_amount(amount: Decimal, sep: str = " ") -> str:
     return f"{int(int_part):,}".replace(",", sep) + "." + frac_part
 
 
+def format_rate(rate: Decimal, sep: str = " ") -> str:
+    """Format exchange rate with exactly 4 decimal places and thousands separator."""
+    rounded = rate.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+    s = f"{rounded:.4f}"
+    int_part, frac_part = s.split(".")
+    return f"{int(int_part):,}".replace(",", sep) + "." + frac_part
+
+
 def pluralize(n: int, form1: str, form2: str, form5: str) -> str:
     """Склонение существительных по числу (1 расход, 2 расхода, 5 расходов)."""
     n = abs(n)

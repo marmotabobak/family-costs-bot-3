@@ -17,6 +17,7 @@ from bot.db.models import Currency
 from bot.db.repositories.currencies import get_base_currency, list_currencies
 from bot.db.repositories.messages import (
     bulk_delete_messages,
+    bulk_update_messages_currency,
     bulk_update_messages_date,
     bulk_update_messages_user,
     delete_message_by_id,
@@ -706,7 +707,7 @@ async def delete_cost(
 @router.post("/bulk-delete")
 async def bulk_delete(
     request: Request,
-    ids: list[int] = Form(...),
+    ids: list[int] = Form(default=[]),
     csrf_token: str = Form(""),
 ):
     """Handle bulk delete of selected costs."""
@@ -756,8 +757,8 @@ async def bulk_delete(
 @router.post("/bulk-change-date")
 async def bulk_change_date(
     request: Request,
-    ids: list[int] = Form(...),
-    new_date: str = Form(...),
+    ids: list[int] = Form(default=[]),
+    new_date: str = Form(default=""),
     csrf_token: str = Form(""),
 ):
     """Handle bulk date change for selected costs."""
@@ -813,8 +814,8 @@ async def bulk_change_date(
 @router.post("/bulk-change-user")
 async def bulk_change_user(
     request: Request,
-    ids: list[int] = Form(...),
-    new_user_id: int = Form(...),
+    ids: list[int] = Form(default=[]),
+    new_user_id: int | None = Form(default=None),
     csrf_token: str = Form(""),
 ):
     """Handle bulk user change for selected costs. Admin only."""
@@ -833,7 +834,7 @@ async def bulk_change_user(
         set_flash_message(request, "Не выбрано ничего", "error")
         return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
-    if new_user_id < 1:
+    if new_user_id is None or new_user_id < 1:
         set_flash_message(request, "Некорректный пользователь", "error")
         return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
 
@@ -851,6 +852,66 @@ async def bulk_change_user(
     set_flash_message(
         request,
         f"Пользователь обновлён для {count} {pluralize(count, 'расхода', 'расходов', 'расходов')}",
+        "success",
+    )
+    return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+
+@router.post("/bulk-change-currency")
+async def bulk_change_currency(
+    request: Request,
+    ids: list[int] = Form(default=[]),
+    new_currency_id: str = Form(default=""),
+    csrf_token: str = Form(""),
+):
+    """Handle bulk currency change for selected costs.
+
+    ``new_currency_id`` is a string so that an empty value clears the currency
+    (sets ``currency_id`` to ``NULL``).  A numeric string sets the FK.
+    """
+    if not is_authenticated(request):
+        return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
+    if not validate_csrf_token(request, csrf_token):
+        raise HTTPException(status_code=403, detail="Invalid CSRF token")
+    if not ids:
+        set_flash_message(request, "Не выбрано ничего", "error")
+        return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    # Parse: empty string → None (clear currency), int string → specific currency FK
+    resolved_currency_id: int | None = None
+    if new_currency_id.strip():
+        try:
+            resolved_currency_id = int(new_currency_id)
+        except ValueError:
+            set_flash_message(request, "Некорректная валюта", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    async with get_db_session() as session:
+        # Non-admins may only edit their own costs
+        if not is_admin(request):
+            current_user_id = get_current_user_telegram_id(request)
+            all_messages = await get_all_messages(session)
+            messages_map: dict[Any, Any] = {m.id: m for m in all_messages}
+            if any(
+                mid in messages_map and messages_map[mid].user_id != current_user_id
+                for mid in ids
+            ):
+                set_flash_message(request, "Вы можете изменять только свои расходы", "error")
+                return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+        try:
+            count = await bulk_update_messages_currency(session, ids, resolved_currency_id)
+            await session.commit()
+            logger.info("Bulk updated currency for %d costs via web", count)
+        except Exception as e:
+            logger.exception("Error in bulk change currency: %s", e)
+            await session.rollback()
+            set_flash_message(request, "Ошибка обновления валюты", "error")
+            return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)
+
+    set_flash_message(
+        request,
+        f"Валюта обновлена для {count} {pluralize(count, 'расхода', 'расходов', 'расходов')}",
         "success",
     )
     return RedirectResponse(url=f"{settings.web_root_path}/costs", status_code=303)

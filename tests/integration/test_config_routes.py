@@ -18,8 +18,12 @@ from bot.web.auth import SESSION_COOKIE, auth_sessions, login_attempts
 
 
 def _get_currency_id_from_html(html: str, code: str) -> int | None:
-    """Parse currencies list HTML to extract the ID of a specific currency code."""
-    pattern = rf'<strong>{re.escape(code)}</strong>.*?/config/currencies/(\d+)/rates'
+    """Parse currencies list HTML to extract the ID of a specific currency code.
+
+    Uses the delete-form URL because it is present for every currency (including
+    base ones that no longer have a Курсы link).
+    """
+    pattern = rf'<strong>{re.escape(code)}</strong>.*?/config/currencies/(\d+)/delete'
     match = re.search(pattern, html, re.DOTALL)
     return int(match.group(1)) if match else None
 
@@ -252,6 +256,97 @@ class TestNavEntry:
         assert resp.status_code in (200, 303)
         if resp.status_code == 200:
             assert "Конфигурация" not in resp.text
+
+
+# ---------------------------------------------------------------------------
+# Task 4.5 — Inline default-rate update (JSON endpoint)
+# ---------------------------------------------------------------------------
+
+class TestCurrencyUpdateRateInline:
+    def test_update_rate_success(self, admin_client):
+        client, csrf = admin_client
+        client.post(
+            "/config/currencies",
+            data={"code": "USD", "default_rate": "90", "csrf_token": csrf},
+        )
+        list_resp = client.get("/config/currencies")
+        usd_id = _get_currency_id_from_html(list_resp.text, "USD")
+        if usd_id is None:
+            pytest.skip("USD not created")
+
+        resp = client.post(
+            f"/config/currencies/{usd_id}/update-rate",
+            data={"default_rate": "95.5", "csrf_token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert "95" in data["formatted"]
+
+    def test_update_rate_invalid_rate(self, admin_client):
+        client, csrf = admin_client
+        client.post(
+            "/config/currencies",
+            data={"code": "USD", "default_rate": "90", "csrf_token": csrf},
+        )
+        list_resp = client.get("/config/currencies")
+        usd_id = _get_currency_id_from_html(list_resp.text, "USD")
+        if usd_id is None:
+            pytest.skip("USD not created")
+
+        resp = client.post(
+            f"/config/currencies/{usd_id}/update-rate",
+            data={"default_rate": "bad", "csrf_token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert "error" in data
+
+    def test_update_rate_invalid_csrf(self, admin_client):
+        client, csrf = admin_client
+        client.post(
+            "/config/currencies",
+            data={"code": "USD", "default_rate": "90", "csrf_token": csrf},
+        )
+        list_resp = client.get("/config/currencies")
+        usd_id = _get_currency_id_from_html(list_resp.text, "USD")
+        if usd_id is None:
+            pytest.skip("USD not created")
+
+        resp = client.post(
+            f"/config/currencies/{usd_id}/update-rate",
+            data={"default_rate": "95", "csrf_token": "bad"},
+        )
+        assert resp.status_code == 403
+
+    def test_cannot_update_base_currency_rate(self, admin_client):
+        client, csrf = admin_client
+        list_resp = client.get("/config/currencies")
+        rub_id = _get_currency_id_from_html(list_resp.text, "RUB")
+        if rub_id is None:
+            pytest.skip("RUB not found")
+
+        resp = client.post(
+            f"/config/currencies/{rub_id}/update-rate",
+            data={"default_rate": "2", "csrf_token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert "error" in data
+
+    def test_update_rate_currency_not_found(self, admin_client):
+        client, csrf = admin_client
+        resp = client.post(
+            "/config/currencies/999999/update-rate",
+            data={"default_rate": "95", "csrf_token": csrf},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        assert "error" in data
+
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,16 @@
             <input type="date" name="new_date" disabled>
             <button type="submit" class="btn btn-secondary btn-small" disabled>Изменить дату</button>
         </form>
+        <form id="bulkCurrencyForm" action="{{ root_path }}/costs/bulk-change-currency" method="post" class="bulk-date-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <select name="new_currency_id" disabled>
+                <option value="">Без валюты</option>
+                {% for c in currencies %}
+                <option value="{{ c.id }}">{{ c.code }}{% if c.is_base %} (база){% endif %}</option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-secondary btn-small" disabled>Изменить валюту</button>
+        </form>
         {% if is_admin %}
         <form id="bulkUserForm" action="{{ root_path }}/costs/bulk-change-user" method="post" class="bulk-user-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -272,6 +282,20 @@
             const count = [...checkboxes].filter(cb => cb.checked).length;
             const userName = userSelect.options[userSelect.selectedIndex].text;
             if (!confirm('Изменить пользователя для ' + count + ' записей на "' + userName + '"?')) {
+                e.preventDefault();
+                return;
+            }
+            addSelectedIds(this);
+        });
+    }
+
+    const currencyForm = document.getElementById('bulkCurrencyForm');
+    if (currencyForm) {
+        currencyForm.addEventListener('submit', function(e) {
+            const sel = this.querySelector('select[name="new_currency_id"]');
+            const count = [...checkboxes].filter(cb => cb.checked).length;
+            const label = sel.value ? sel.options[sel.selectedIndex].text : 'без валюты';
+            if (!confirm('Изменить валюту для ' + count + ' записей на "' + label + '"?')) {
                 e.preventDefault();
                 return;
             }

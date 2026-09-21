@@ -18,7 +18,7 @@ if not _orig_url:
     try:
         from dotenv import dotenv_values
 
-        _orig_url = dotenv_values(".env").get("DATABASE_URL", "")
+        _orig_url = dotenv_values(".env").get("DATABASE_URL") or ""
     except Exception:
         pass
 

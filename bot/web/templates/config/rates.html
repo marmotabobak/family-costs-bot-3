@@ -27,7 +27,15 @@
             {% for r in rates %}
             <tr>
                 <td>{{ r.rate_date.strftime('%d.%m.%Y') }}</td>
-                <td class="amount">{{ r.rate|format_amount }}</td>
+                <td class="amount">
+                    <span id="rate-display-{{ r.id }}">{{ r.rate|format_rate }}</span>
+                    <input type="text" id="rate-input-{{ r.id }}" value="{{ r.rate|format_rate }}"
+                           class="form-input rate-inline-input" style="display:none; width:10ch">
+                    &nbsp;<a href="#" id="rate-edit-{{ r.id }}" class="link-action"
+                             onclick="startEditRate({{ r.id }}); return false;">Изменить</a>
+                    <a href="#" id="rate-save-{{ r.id }}" class="link-action" style="display:none"
+                       onclick="saveRate({{ r.id }}); return false;">Сохранить</a>
+                </td>
                 <td class="actions">
                     <form action="{{ root_path }}/config/currencies/{{ currency.id }}/rates/{{ r.id }}/delete"
                           method="post" class="inline-form">
@@ -56,7 +64,7 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="form-group">
             <label for="rate_date">Дата:</label>
-            <input type="date" id="rate_date" name="rate_date" required class="form-input">
+            <input type="date" id="rate_date" name="rate_date" required class="form-input" value="{{ today }}">
         </div>
         <div class="form-group">
             <label for="rate">Курс:</label>
@@ -68,4 +76,51 @@
     </form>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const CSRF = {{ csrf_token|tojson }};
+    const ROOT = {{ (root_path ~ '/config/currencies/' ~ currency.id ~ '/rates')|tojson }};
+
+    function startEditRate(id) {
+        document.getElementById('rate-display-' + id).style.display = 'none';
+        document.getElementById('rate-input-' + id).style.display = 'inline-block';
+        document.getElementById('rate-edit-' + id).style.display = 'none';
+        document.getElementById('rate-save-' + id).style.display = 'inline';
+    }
+
+    function stopEditRate(id, newText) {
+        document.getElementById('rate-display-' + id).textContent = newText;
+        document.getElementById('rate-display-' + id).style.display = 'inline';
+        document.getElementById('rate-input-' + id).style.display = 'none';
+        document.getElementById('rate-input-' + id).value = newText;
+        document.getElementById('rate-edit-' + id).style.display = 'inline';
+        document.getElementById('rate-save-' + id).style.display = 'none';
+    }
+
+    window.startEditRate = startEditRate;
+
+    window.saveRate = async function(id) {
+        const input = document.getElementById('rate-input-' + id);
+        const value = input.value.trim();
+        try {
+            const resp = await fetch(ROOT + '/' + id + '/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'rate=' + encodeURIComponent(value) + '&csrf_token=' + encodeURIComponent(CSRF)
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                stopEditRate(id, data.formatted);
+            } else {
+                alert(data.error || 'Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка сети');
+        }
+    };
+})();
+</script>
 {% endblock %}

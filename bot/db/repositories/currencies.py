@@ -156,12 +156,14 @@ async def promote_to_base(session: AsyncSession, currency_id: int) -> Currency:
        base by dividing by the new base's current ``default_rate`` (``factor``).
     2. Recalculate every dated ``ExchangeRate`` for non-target currencies the
        same way.
-    3. Set ``is_base=False`` on the current base (if any).
-    4. Set ``is_base=True`` and ``default_rate=1`` on the target currency.
+    3. Move the target's own dated rates to the old base currency as inverted
+       rates (1 / original_rate), then delete the target's dated rates.
+    4. Set ``is_base=False`` on the current base (if any).
+    5. Set ``is_base=True`` and ``default_rate=1`` on the target currency.
 
     Raises ``ValueError`` if *currency_id* does not exist.
     """
-    from sqlalchemy import update
+    from sqlalchemy import delete as sa_delete, update
 
     target = await get_currency_by_id(session, currency_id)
     if target is None:
@@ -173,6 +175,13 @@ async def promote_to_base(session: AsyncSession, currency_id: int) -> Currency:
 
     factor = Decimal(str(target.default_rate))
 
+    # Fetch the old base and target's dated rates before any modifications
+    old_base = await get_base_currency(session)
+    target_rates_result = await session.execute(
+        select(ExchangeRate).where(ExchangeRate.currency_id == currency_id)
+    )
+    target_rates = list(target_rates_result.scalars().all())
+
     # Recalculate default_rate for every currency except the new base
     await session.execute(
         update(Currency)
@@ -180,11 +189,16 @@ async def promote_to_base(session: AsyncSession, currency_id: int) -> Currency:
         .values(default_rate=Currency.default_rate / factor)
     )
 
-    # Recalculate all dated exchange rates (they belong to non-base currencies,
-    # so none of them belong to the new base — no need to filter further)
+    # Recalculate dated exchange rates for non-target currencies only
     await session.execute(
         update(ExchangeRate)
+        .where(ExchangeRate.currency_id != currency_id)
         .values(rate=ExchangeRate.rate / factor)
+    )
+
+    # Delete target's dated exchange rates — they will be moved to the old base
+    await session.execute(
+        sa_delete(ExchangeRate).where(ExchangeRate.currency_id == currency_id)
     )
 
     # Demote current base and promote target
@@ -198,6 +212,15 @@ async def promote_to_base(session: AsyncSession, currency_id: int) -> Currency:
         .where(Currency.id == currency_id)
         .values(is_base=True, default_rate=Decimal("1"))
     )
+
+    # Create inverted dated rates for the old base (now a non-base currency)
+    if old_base is not None:
+        for tr in target_rates:
+            session.add(ExchangeRate(
+                currency_id=old_base.id,
+                rate=Decimal("1") / Decimal(str(tr.rate)),
+                rate_date=tr.rate_date,
+            ))
 
     await session.flush()
     await session.refresh(target)
@@ -290,6 +313,31 @@ async def create_exchange_rate(
         rate_date=rate_date,
     )
     session.add(exchange_rate)
+    await session.flush()
+    await session.refresh(exchange_rate)
+    return exchange_rate
+
+
+async def update_exchange_rate(
+    session: AsyncSession,
+    rate_id: int,
+    rate: Decimal,
+) -> ExchangeRate | None:
+    """Update the ``rate`` value of an existing dated exchange rate.
+
+    Returns the updated :class:`ExchangeRate` or ``None`` if not found.
+    Raises ``ValueError`` if *rate* <= 0.
+    """
+    _validate_rate(rate)
+
+    result = await session.execute(
+        select(ExchangeRate).where(ExchangeRate.id == rate_id)
+    )
+    exchange_rate = result.scalar_one_or_none()
+    if exchange_rate is None:
+        return None
+
+    exchange_rate.rate = rate  # type: ignore[assignment]
     await session.flush()
     await session.refresh(exchange_rate)
     return exchange_rate

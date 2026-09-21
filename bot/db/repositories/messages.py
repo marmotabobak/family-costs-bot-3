@@ -456,6 +456,29 @@ async def get_all_users_costs_by_month(
     return user_totals
 
 
+async def bulk_update_messages_currency(
+    session: AsyncSession,
+    message_ids: list[int],
+    new_currency_id: int | None,
+) -> int:
+    """Обновляет currency_id для нескольких сообщений.
+
+    Accepts ``None`` to clear the currency (set to NULL).
+
+    Returns:
+        Количество обновлённых записей
+    """
+    from sqlalchemy import update
+    from sqlalchemy.engine import Result
+
+    result: Result[Any] = await session.execute(
+        update(Message)
+        .where(Message.id.in_(message_ids))
+        .values(currency_id=new_currency_id)
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
+
+
 async def get_available_months(session: AsyncSession) -> list[tuple[int, int]]:
     """Возвращает список (year, month) для которых есть записи (все пользователи)."""
     from sqlalchemy import extract

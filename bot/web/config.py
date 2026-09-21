@@ -21,7 +21,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from bot.config import settings
@@ -36,8 +36,10 @@ from bot.db.repositories.currencies import (
     list_exchange_rates,
     promote_to_base,
     update_currency,
+    update_exchange_rate,
 )
-from bot.utils import format_amount
+from bot.services.currency_rates import effective_rate
+from bot.utils import format_amount, format_rate
 from bot.web.auth import (
     admin_required,
     get_csrf_token,
@@ -61,6 +63,7 @@ BASE_DIR = Path(__file__).parent
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 templates.env.globals["root_path"] = settings.web_root_path
 templates.env.filters["format_amount"] = format_amount
+templates.env.filters["format_rate"] = format_rate
 
 
 def _auth_context(request: Request) -> dict:
@@ -90,9 +93,19 @@ async def config_index(request: Request):
 
 @router.get("/currencies", response_class=HTMLResponse)
 async def currencies_list(request: Request):
-    """Show currency list and create form."""
+    """Show currency list and create form.
+
+    Computes the *current* effective rate for each currency (using today's date)
+    and passes it to the template as ``current_rates`` — a ``dict[int, str]``
+    keyed by ``currency.id`` with a pre-formatted string value.
+    """
     async with get_db_session() as session:
         currencies = await list_currencies(session)
+        today = date.today()
+        current_rates: dict[int, str] = {}
+        for c in currencies:
+            rate = await effective_rate(session, c, today)
+            current_rates[int(c.id)] = format_rate(rate)
 
     flash_message, flash_type = get_flash_message(request)
 
@@ -102,6 +115,7 @@ async def currencies_list(request: Request):
         {
             **_auth_context(request),
             "currencies": currencies,
+            "current_rates": current_rates,
             "csrf_token": get_csrf_token(request),
             "flash_message": flash_message,
             "flash_type": flash_type,
@@ -127,12 +141,20 @@ async def currencies_create(
     try:
         rate_decimal = Decimal(default_rate.replace(",", "."))
     except (InvalidOperation, ValueError):
+        async with get_db_session() as session:
+            _curr_err = await list_currencies(session)
+            _today_err = date.today()
+            _rates_err: dict[int, str] = {
+                int(c.id): format_rate(await effective_rate(session, c, _today_err))
+                for c in _curr_err
+            }
         return templates.TemplateResponse(
             request,
             "config/currencies.html",
             {
                 **_auth_context(request),
-                "currencies": currencies,
+                "currencies": _curr_err,
+                "current_rates": _rates_err,
                 "csrf_token": get_csrf_token(request),
                 "flash_message": None,
                 "flash_type": None,
@@ -148,12 +170,18 @@ async def currencies_create(
     except ValueError as e:
         async with get_db_session() as session:
             currencies = await list_currencies(session)
+            _today_ve = date.today()
+            _rates_ve: dict[int, str] = {
+                int(c.id): format_rate(await effective_rate(session, c, _today_ve))
+                for c in currencies
+            }
         return templates.TemplateResponse(
             request,
             "config/currencies.html",
             {
                 **_auth_context(request),
                 "currencies": currencies,
+                "current_rates": _rates_ve,
                 "csrf_token": get_csrf_token(request),
                 "flash_message": None,
                 "flash_type": None,
@@ -212,6 +240,7 @@ async def currencies_edit_form(request: Request, currency_id: int):
         {
             **_auth_context(request),
             "currencies": [],
+            "current_rates": {},
             "edit_currency": currency,
             "csrf_token": get_csrf_token(request),
             "flash_message": None,
@@ -243,6 +272,7 @@ async def currencies_edit(
             {
                 **_auth_context(request),
                 "currencies": [],
+                "current_rates": {},
                 "edit_currency": currency,
                 "csrf_token": get_csrf_token(request),
                 "flash_message": None,
@@ -268,6 +298,7 @@ async def currencies_edit(
             {
                 **_auth_context(request),
                 "currencies": [],
+                "current_rates": {},
                 "edit_currency": currency,
                 "csrf_token": get_csrf_token(request),
                 "flash_message": None,
@@ -282,6 +313,39 @@ async def currencies_edit(
     return RedirectResponse(
         url=f"{settings.web_root_path}/config/currencies", status_code=303
     )
+
+
+@router.post("/currencies/{currency_id}/update-rate")
+async def currencies_update_rate_inline(
+    request: Request,
+    currency_id: int,
+    default_rate: str = Form(...),
+    csrf_token: str = Form(""),
+):
+    """Inline JSON endpoint to update a currency's ``default_rate``.
+
+    Returns a JSON object ``{"ok": true, "formatted": "<rate>"}`` on success
+    or ``{"ok": false, "error": "<message>"}`` on failure.  Used by the
+    inline-edit UI on the currencies list page.
+    """
+    if not validate_csrf_token(request, csrf_token):
+        return JSONResponse({"ok": False, "error": "Invalid CSRF token"}, status_code=403)
+    try:
+        rate_decimal = Decimal(default_rate.replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return JSONResponse({"ok": False, "error": "Некорректный курс"})
+    try:
+        async with get_db_session() as session:
+            currency = await update_currency(session, currency_id, rate_decimal)
+            await session.commit()
+        if currency is None:
+            return JSONResponse({"ok": False, "error": "Валюта не найдена"})
+        return JSONResponse({"ok": True, "formatted": format_rate(rate_decimal)})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    except Exception as e:
+        logger.exception("Error updating currency rate inline %d: %s", currency_id, e)
+        return JSONResponse({"ok": False, "error": "Ошибка сервера"})
 
 
 @router.post("/currencies/{currency_id}/delete", response_class=HTMLResponse)
@@ -306,6 +370,11 @@ async def currencies_delete(
         # Re-render the list with the error message
         async with get_db_session() as session:
             currencies = await list_currencies(session)
+            _today_del = date.today()
+            _rates_del: dict[int, str] = {
+                int(c.id): format_rate(await effective_rate(session, c, _today_del))
+                for c in currencies
+            }
         flash_message, flash_type = get_flash_message(request)
         return templates.TemplateResponse(
             request,
@@ -313,6 +382,7 @@ async def currencies_delete(
             {
                 **_auth_context(request),
                 "currencies": currencies,
+                "current_rates": _rates_del,
                 "csrf_token": get_csrf_token(request),
                 "flash_message": flash_message,
                 "flash_type": flash_type,
@@ -350,6 +420,7 @@ async def rates_list(request: Request, currency_id: int):
             **_auth_context(request),
             "currency": currency,
             "rates": rates,
+            "today": date.today().isoformat(),
             "csrf_token": get_csrf_token(request),
             "flash_message": flash_message,
             "flash_type": flash_type,
@@ -442,6 +513,39 @@ async def rates_create(
         url=f"{settings.web_root_path}/config/currencies/{currency_id}/rates",
         status_code=303,
     )
+
+
+@router.post("/currencies/{currency_id}/rates/{rate_id}/update")
+async def rates_update_inline(
+    request: Request,
+    currency_id: int,
+    rate_id: int,
+    rate: str = Form(...),
+    csrf_token: str = Form(""),
+):
+    """Inline JSON endpoint to update a dated exchange rate value.
+
+    Returns ``{"ok": true, "formatted": "<rate>"}`` on success
+    or ``{"ok": false, "error": "<message>"}`` on failure.
+    """
+    if not validate_csrf_token(request, csrf_token):
+        return JSONResponse({"ok": False, "error": "Invalid CSRF token"}, status_code=403)
+    try:
+        rate_decimal = Decimal(rate.replace(",", "."))
+    except (InvalidOperation, ValueError):
+        return JSONResponse({"ok": False, "error": "Некорректный курс"})
+    try:
+        async with get_db_session() as session:
+            updated = await update_exchange_rate(session, rate_id, rate_decimal)
+            await session.commit()
+        if updated is None:
+            return JSONResponse({"ok": False, "error": "Курс не найден"})
+        return JSONResponse({"ok": True, "formatted": format_rate(rate_decimal)})
+    except ValueError as e:
+        return JSONResponse({"ok": False, "error": str(e)})
+    except Exception as e:
+        logger.exception("Error updating rate %d inline: %s", rate_id, e)
+        return JSONResponse({"ok": False, "error": "Ошибка сервера"})
 
 
 @router.post(

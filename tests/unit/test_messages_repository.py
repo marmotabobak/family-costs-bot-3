@@ -417,6 +417,51 @@ class TestBulkUpdateMessagesUser:
         assert count == 0
 
 
+class TestBulkUpdateMessagesCurrency:
+    """Tests for bulk_update_messages_currency function."""
+
+    @pytest.mark.asyncio
+    async def test_updates_currency_for_given_ids(self, mock_session):
+        """Updates currency_id for messages with specified IDs."""
+        from bot.db.repositories.messages import bulk_update_messages_currency
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 3
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_currency(mock_session, [1, 2, 3], new_currency_id=5)
+
+        assert count == 3
+        mock_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_clears_currency_when_none(self, mock_session):
+        """Accepts None to clear currency_id (set to NULL)."""
+        from bot.db.repositories.messages import bulk_update_messages_currency
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 2
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_currency(mock_session, [1, 2], new_currency_id=None)
+
+        assert count == 2
+        mock_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_no_rows_updated(self, mock_session):
+        """Returns 0 when no rows were updated."""
+        from bot.db.repositories.messages import bulk_update_messages_currency
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 0
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_currency(mock_session, [999], new_currency_id=1)
+
+        assert count == 0
+
+
 class TestGetAllUsersCostsByMonth:
     """Tests for get_all_users_costs_by_month function."""
 

@@ -12,6 +12,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from bot.db.dependencies import get_session
 from bot.db.repositories.currencies import (
@@ -114,6 +115,7 @@ class TestCreateCurrency:
         """Delete all currencies including RUB, then create EUR; should become base."""
         from sqlalchemy import text
         async with get_session() as session:
+            await session.execute(text("DELETE FROM messages"))
             await session.execute(text("DELETE FROM exchange_rates"))
             await session.execute(text("DELETE FROM currencies"))
             await session.commit()
@@ -228,7 +230,6 @@ class TestPromoteToBase:
             await session.commit()
 
         async with get_session() as session:
-            from sqlalchemy import select
             from bot.db.models import ExchangeRate
             result = await session.execute(
                 select(ExchangeRate).where(ExchangeRate.id == usd_rate_id)
@@ -237,6 +238,62 @@ class TestPromoteToBase:
 
         # 95 RUB per USD → 95/100 = 0.95 EUR per USD
         assert Decimal(str(updated_rate.rate)) == Decimal("95") / Decimal("100")
+
+    @pytest.mark.asyncio
+    async def test_promote_moves_target_rates_to_old_base(self):
+        """Target's dated rates are moved (inverted) to the old base currency."""
+        async with get_session() as session:
+            eur = await create_currency(session, "EUR", Decimal("100"))
+            eur_rate1 = await create_exchange_rate(
+                session, int(eur.id), Decimal("90"), date(2026, 3, 1)
+            )
+            eur_rate2 = await create_exchange_rate(
+                session, int(eur.id), Decimal("110"), date(2026, 6, 1)
+            )
+            await session.commit()
+            eur_id = int(eur.id)
+            eur_rate1_id, eur_rate2_id = int(eur_rate1.id), int(eur_rate2.id)
+
+        async with get_session() as session:
+            await promote_to_base(session, eur_id)
+            await session.commit()
+
+        async with get_session() as session:
+            from bot.db.models import ExchangeRate
+            # EUR's own dated rates must be gone
+            result = await session.execute(
+                select(ExchangeRate).where(
+                    ExchangeRate.id.in_([eur_rate1_id, eur_rate2_id])
+                )
+            )
+            assert result.scalars().all() == []
+
+            # Old base (RUB) must have inverted rates on the same dates
+            rub = await get_currency_by_code(session, "RUB")
+            rub_rates = await list_exchange_rates(session, int(rub.id))
+            rub_rates_by_date = {r.rate_date: Decimal(str(r.rate)) for r in rub_rates}
+
+        scale = Decimal("0.0000000001")  # Numeric(20, 10)
+        assert rub_rates_by_date[date(2026, 3, 1)] == (Decimal("1") / Decimal("90")).quantize(scale)
+        assert rub_rates_by_date[date(2026, 6, 1)] == (Decimal("1") / Decimal("110")).quantize(scale)
+
+    @pytest.mark.asyncio
+    async def test_promote_target_with_no_dated_rates_leaves_old_base_clean(self):
+        """Promoting a currency with no dated rates does not create spurious rates."""
+        async with get_session() as session:
+            usd = await create_currency(session, "USD", Decimal("90"))
+            await session.commit()
+            usd_id = int(usd.id)
+
+        async with get_session() as session:
+            await promote_to_base(session, usd_id)
+            await session.commit()
+
+        async with get_session() as session:
+            rub = await get_currency_by_code(session, "RUB")
+            rub_rates = await list_exchange_rates(session, int(rub.id))
+
+        assert rub_rates == []
 
 
 class TestDeleteCurrency:

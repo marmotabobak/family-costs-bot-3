@@ -6,37 +6,12 @@
 <div class="card">
     <div class="card-header">
         <h2>Конфигурация — Валюты</h2>
-        <a href="{{ root_path }}/costs" class="btn btn-secondary">← Расходы</a>
     </div>
 
     {% if error %}
     <div class="alert alert-error">{{ error }}</div>
     {% endif %}
 
-    {% if edit_currency %}
-    {# ----- Edit default_rate form ----- #}
-    <h3>Редактировать валюту {{ edit_currency.code }}</h3>
-    <form action="{{ root_path }}/config/currencies/{{ edit_currency.id }}/edit" method="post">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <div class="form-group">
-            <label for="default_rate">Базовый курс (default_rate):</label>
-            <input type="text" id="default_rate" name="default_rate"
-                   value="{{ edit_currency.default_rate }}"
-                   class="form-input" required
-                   {% if edit_currency.is_base %}disabled{% endif %}>
-            {% if edit_currency.is_base %}
-            <small class="form-hint">Базовая валюта — курс всегда 1.</small>
-            {% endif %}
-        </div>
-        <div class="form-actions">
-            <a href="{{ root_path }}/config/currencies" class="btn btn-secondary">Отмена</a>
-            {% if not edit_currency.is_base %}
-            <button type="submit" class="btn btn-primary">Сохранить</button>
-            {% endif %}
-        </div>
-    </form>
-
-    {% else %}
     {# ----- Currency list ----- #}
     <table class="costs-table">
         <thead>
@@ -44,6 +19,7 @@
                 <th>Код</th>
                 <th>База</th>
                 <th>Курс по умолчанию</th>
+                <th>Текущий курс</th>
                 <th>Действия</th>
             </tr>
         </thead>
@@ -52,11 +28,23 @@
             <tr>
                 <td><strong>{{ c.code }}</strong></td>
                 <td>{% if c.is_base %}<span class="badge badge-success">база</span>{% endif %}</td>
-                <td class="amount">{{ c.default_rate|format_amount }}</td>
+                <td class="amount">
+                    {% if c.is_base %}
+                    <span class="text-muted">{{ c.default_rate|format_rate }}</span>
+                    {% else %}
+                    <span id="rate-display-{{ c.id }}">{{ c.default_rate|format_rate }}</span>
+                    <input type="text" id="rate-input-{{ c.id }}" value="{{ c.default_rate|format_rate }}"
+                           class="form-input rate-inline-input" style="display:none; width:10ch">
+                    &nbsp;<a href="#" id="rate-edit-{{ c.id }}" class="link-action"
+                             onclick="startEditRate({{ c.id }}); return false;">Изменить</a>
+                    <a href="#" id="rate-save-{{ c.id }}" class="link-action" style="display:none"
+                       onclick="saveRate({{ c.id }}); return false;">Сохранить</a>
+                    {% endif %}
+                </td>
+                <td class="amount text-muted">{{ current_rates[c.id] }}</td>
                 <td class="actions">
-                    <a href="{{ root_path }}/config/currencies/{{ c.id }}/rates" class="btn btn-secondary btn-small">Курсы</a>
-                    <a href="{{ root_path }}/config/currencies/{{ c.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
                     {% if not c.is_base %}
+                    <a href="{{ root_path }}/config/currencies/{{ c.id }}/rates" class="btn btn-secondary btn-small">Курсы</a>
                     <form action="{{ root_path }}/config/currencies/{{ c.id }}/promote" method="post" class="inline-form">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-secondary btn-small"
@@ -75,7 +63,7 @@
                 </td>
             </tr>
             {% else %}
-            <tr><td colspan="4">Нет валют.</td></tr>
+            <tr><td colspan="5">Нет валют.</td></tr>
             {% endfor %}
         </tbody>
     </table>
@@ -99,6 +87,52 @@
             <button type="submit" class="btn btn-primary">Добавить</button>
         </div>
     </form>
-    {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const CSRF = {{ csrf_token|tojson }};
+    const ROOT = {{ (root_path ~ '/config/currencies')|tojson }};
+
+    function startEditRate(id) {
+        document.getElementById('rate-display-' + id).style.display = 'none';
+        document.getElementById('rate-input-' + id).style.display = 'inline-block';
+        document.getElementById('rate-edit-' + id).style.display = 'none';
+        document.getElementById('rate-save-' + id).style.display = 'inline';
+    }
+
+    function stopEditRate(id, newText) {
+        document.getElementById('rate-display-' + id).textContent = newText;
+        document.getElementById('rate-display-' + id).style.display = 'inline';
+        document.getElementById('rate-input-' + id).style.display = 'none';
+        document.getElementById('rate-input-' + id).value = newText;
+        document.getElementById('rate-edit-' + id).style.display = 'inline';
+        document.getElementById('rate-save-' + id).style.display = 'none';
+    }
+
+    window.startEditRate = startEditRate;
+
+    window.saveRate = async function(id) {
+        const input = document.getElementById('rate-input-' + id);
+        const value = input.value.trim();
+        try {
+            const resp = await fetch(ROOT + '/' + id + '/update-rate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'default_rate=' + encodeURIComponent(value) + '&csrf_token=' + encodeURIComponent(CSRF)
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                stopEditRate(id, data.formatted);
+            } else {
+                alert(data.error || 'Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка сети');
+        }
+    };
+})();
+</script>
 {% endblock %}

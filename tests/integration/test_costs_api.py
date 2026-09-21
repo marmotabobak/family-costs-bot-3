@@ -876,3 +876,97 @@ class TestEdgeCasesApi:
                 )
 
         assert response.status_code == 303
+
+
+class TestBulkChangeCurrency:
+    """Tests for POST /costs/bulk-change-currency endpoint."""
+
+    def test_requires_authentication(self, client):
+        """Redirects to login if not authenticated."""
+        response = client.post(
+            "/costs/bulk-change-currency",
+            data={"ids": "1", "new_currency_id": "5", "csrf_token": "x"},
+            follow_redirects=False,
+        )
+        assert response.status_code == 303
+        assert "/login" in response.headers["location"]
+
+    def test_requires_valid_csrf(self, authenticated_client):
+        """Returns 403 for invalid CSRF token."""
+        client, _ = authenticated_client
+        response = client.post(
+            "/costs/bulk-change-currency",
+            data={"ids": "1", "new_currency_id": "5", "csrf_token": "bad-csrf"},
+        )
+        assert response.status_code == 403
+
+    def test_requires_ids(self, authenticated_client, mock_db_session):
+        """Redirects with error when no IDs are provided."""
+        client, csrf_token = authenticated_client
+
+        with patch("bot.web.costs.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+
+            response = client.post(
+                "/costs/bulk-change-currency",
+                data={"new_currency_id": "5", "csrf_token": csrf_token},
+                follow_redirects=False,
+            )
+
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+    def test_success_sets_currency(self, authenticated_client, mock_db_session):
+        """Redirects to /costs after successful bulk currency update."""
+        client, csrf_token = authenticated_client
+
+        with patch("bot.web.costs.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+            with patch(
+                "bot.web.costs.bulk_update_messages_currency",
+                new=AsyncMock(return_value=2),
+            ):
+                response = client.post(
+                    "/costs/bulk-change-currency",
+                    data={"ids": ["1", "2"], "new_currency_id": "5", "csrf_token": csrf_token},
+                    follow_redirects=False,
+                )
+
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
+
+    def test_success_clears_currency(self, authenticated_client, mock_db_session):
+        """Empty new_currency_id clears the currency (sets to NULL)."""
+        client, csrf_token = authenticated_client
+
+        with patch("bot.web.costs.get_db_session") as mock_get_session:
+            mock_get_session.return_value.__aenter__ = AsyncMock(return_value=mock_db_session)
+            mock_get_session.return_value.__aexit__ = AsyncMock(return_value=None)
+            with patch(
+                "bot.web.costs.bulk_update_messages_currency",
+                new=AsyncMock(return_value=1),
+            ) as mock_bulk:
+                client.post(
+                    "/costs/bulk-change-currency",
+                    data={"ids": "1", "new_currency_id": "", "csrf_token": csrf_token},
+                    follow_redirects=False,
+                )
+
+        # Third positional arg to bulk_update_messages_currency must be None
+        mock_bulk.assert_called_once()
+        assert mock_bulk.call_args[0][2] is None
+
+    def test_invalid_currency_id_string_redirects(self, authenticated_client):
+        """Non-integer currency ID redirects with an error flash."""
+        client, csrf_token = authenticated_client
+
+        response = client.post(
+            "/costs/bulk-change-currency",
+            data={"ids": "1", "new_currency_id": "not-a-number", "csrf_token": csrf_token},
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert "/costs" in response.headers["location"]
