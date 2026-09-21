@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from bot.config import Environment, settings
 from bot.web.auth import router as auth_router
+from bot.web.config import router as config_router
 from bot.web.costs import router as costs_router
 from bot.web.logs import router as logs_router
 from bot.web.profile import router as profile_router
@@ -24,6 +25,7 @@ app.include_router(costs_router)
 app.include_router(users_router)
 app.include_router(profile_router)
 app.include_router(logs_router)
+app.include_router(config_router)
 
 
 @app.get("/")
