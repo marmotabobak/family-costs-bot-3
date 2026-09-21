@@ -33,7 +33,7 @@ make test-cov         # pytest with coverage (html + xml reports)
 
 Run a single test file: `pytest tests/unit/test_message_parser.py -vv`
 
-Integration tests require a running PostgreSQL instance. Use `make db` first, then run `make migrate`.
+Integration tests require a running PostgreSQL instance. Use `make db` first, then run `make migrate` (migrates the app database). The test suite automatically connects to a separate `<db>_test` database — it is created and migrated by the root `conftest.py` at the start of each test run, so no extra steps are needed. Production data is never touched by tests.
 
 ## Architecture
 
