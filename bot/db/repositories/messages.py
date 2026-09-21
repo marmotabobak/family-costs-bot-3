@@ -20,9 +20,15 @@ class UserCostsStats:
 
 
 async def get_user_costs_stats(session: AsyncSession, user_id: int) -> UserCostsStats:
-    """Возвращает статистику расходов пользователя."""
+    """Возвращает статистику расходов пользователя.
+
+    Uses the structured ``amount`` column for summation.  Rows where
+    ``amount IS NULL`` (legacy rows not yet migrated) are counted but not
+    included in the total.
+    """
+
     result = await session.execute(
-        select(Message.text, Message.created_at)
+        select(Message.amount, Message.created_at)
         .where(Message.user_id == user_id)
         .order_by(Message.created_at)
     )
@@ -36,16 +42,10 @@ async def get_user_costs_stats(session: AsyncSession, user_id: int) -> UserCosts
             last_date=None,
         )
 
-    total = Decimal("0")
-    for row in rows:
-        # Текст в формате "название сумма", берём последнее слово как сумму
-        parts = row.text.rsplit(maxsplit=1)
-        if len(parts) == 2:
-            try:
-                amount = Decimal(parts[1].replace(",", "."))
-                total += amount
-            except Exception:
-                pass
+    total = sum(
+        (Decimal(str(row.amount)) for row in rows if row.amount is not None),
+        Decimal("0"),
+    )
 
     return UserCostsStats(
         total_amount=total,
@@ -57,25 +57,31 @@ async def get_user_costs_stats(session: AsyncSession, user_id: int) -> UserCosts
 
 async def get_user_recent_costs(
     session: AsyncSession, user_id: int, limit: int = 10
-) -> list[tuple[str, Decimal, datetime]]:
-    """Возвращает последние расходы пользователя (название, сумма, дата)."""
+) -> list[tuple[str, Decimal, datetime, int | None]]:
+    """Возвращает последние расходы пользователя.
+
+    Returns:
+        List of ``(name, amount, created_at, currency_id)`` tuples.
+        *name* is extracted from ``text`` (everything before the last token).
+        *amount* is read from the structured ``amount`` column; rows with
+        ``amount IS NULL`` are skipped.
+        *currency_id* may be ``None`` for legacy un-migrated rows.
+    """
     result = await session.execute(
-        select(Message.text, Message.created_at)
+        select(Message.text, Message.amount, Message.created_at, Message.currency_id)
         .where(Message.user_id == user_id)
+        .where(Message.amount.is_not(None))
         .order_by(Message.created_at.desc())
         .limit(limit)
     )
     rows = result.all()
 
-    costs = []
+    costs: list[tuple[str, Decimal, datetime, int | None]] = []
     for row in rows:
+        # Extract name part from text (strip trailing amount token)
         parts = row.text.rsplit(maxsplit=1)
-        if len(parts) == 2:
-            try:
-                amount = Decimal(parts[1].replace(",", "."))
-                costs.append((parts[0], amount, row.created_at))
-            except Exception:
-                pass
+        name = parts[0] if len(parts) == 2 else row.text
+        costs.append((name, Decimal(str(row.amount)), row.created_at, row.currency_id))
 
     return costs
 
@@ -90,28 +96,30 @@ async def get_unique_user_ids(session: AsyncSession) -> list[int]:
 
 async def get_user_costs_by_month(
     session: AsyncSession, user_id: int, year: int, month: int
-) -> list[tuple[str, Decimal, datetime]]:
-    """Возвращает расходы пользователя за конкретный месяц, отсортированные по дате."""
+) -> list[tuple[str, Decimal, datetime, int | None]]:
+    """Возвращает расходы пользователя за конкретный месяц, отсортированные по дате.
+
+    Returns:
+        List of ``(name, amount, created_at, currency_id)`` tuples.
+        Rows with ``amount IS NULL`` are excluded.
+    """
     from sqlalchemy import extract
 
     result = await session.execute(
-        select(Message.text, Message.created_at)
+        select(Message.text, Message.amount, Message.created_at, Message.currency_id)
         .where(Message.user_id == user_id)
+        .where(Message.amount.is_not(None))
         .where(extract("year", Message.created_at) == year)
         .where(extract("month", Message.created_at) == month)
         .order_by(Message.created_at)
     )
     rows = result.all()
 
-    costs = []
+    costs: list[tuple[str, Decimal, datetime, int | None]] = []
     for row in rows:
         parts = row.text.rsplit(maxsplit=1)
-        if len(parts) == 2:
-            try:
-                amount = Decimal(parts[1].replace(",", "."))
-                costs.append((parts[0], amount, row.created_at))
-            except Exception:
-                pass
+        name = parts[0] if len(parts) == 2 else row.text
+        costs.append((name, Decimal(str(row.amount)), row.created_at, row.currency_id))
 
     return costs
 
@@ -170,6 +178,8 @@ async def save_message(
     user_id: int,
     text: str,
     created_at: datetime | None = None,
+    amount: "Decimal | None" = None,
+    currency_id: int | None = None,
 ) -> Message:
     """Создает объект сообщения без commit (для batch операций).
 
@@ -180,7 +190,9 @@ async def save_message(
         session: сессия БД
         user_id: ID пользователя Telegram
         text: текст расхода
-        created_at: опциональная дата создания (по умолчанию - текущее время)
+        created_at: опциональная дата создания (по умолчанию — текущее время)
+        amount: числовая сумма расхода (структурированная колонка)
+        currency_id: FK на ``currencies.id``
     """
     message = Message(
         user_id=user_id,
@@ -190,6 +202,12 @@ async def save_message(
     # Если передана кастомная дата - устанавливаем её
     if created_at is not None:
         message.created_at = created_at  # type: ignore[assignment]
+
+    if amount is not None:
+        message.amount = amount  # type: ignore[assignment]
+
+    if currency_id is not None:
+        message.currency_id = currency_id  # type: ignore[assignment]
 
     session.add(message)
     await session.flush()  # Получаем id и created_at без commit
@@ -276,6 +294,8 @@ async def update_message(
     text: str,
     user_id: int | None = None,
     created_at: datetime | None = None,
+    amount: "Decimal | None" = None,
+    currency_id: int | None = None,
 ) -> Message | None:
     """Обновляет сообщение по ID.
 
@@ -285,6 +305,8 @@ async def update_message(
         text: новый текст
         user_id: новый user_id (опционально)
         created_at: новая дата (опционально)
+        amount: новая сумма (опционально)
+        currency_id: новый FK на currencies (опционально)
 
     Returns:
         Обновленное сообщение или None если не найдено
@@ -298,6 +320,10 @@ async def update_message(
         message.user_id = user_id  # type: ignore[assignment]
     if created_at is not None:
         message.created_at = created_at  # type: ignore[assignment]
+    if amount is not None:
+        message.amount = amount  # type: ignore[assignment]
+    if currency_id is not None:
+        message.currency_id = currency_id  # type: ignore[assignment]
 
     await session.flush()
     await session.refresh(message)
@@ -379,32 +405,78 @@ async def bulk_update_messages_user(
 async def get_all_users_costs_by_month(
     session: AsyncSession, year: int, month: int
 ) -> dict[int, Decimal]:
-    """Возвращает суммы расходов всех пользователей за конкретный месяц.
+    """Возвращает суммы расходов всех пользователей за конкретный месяц в базовой валюте.
+
+    Each row's ``amount`` is converted to the base currency using
+    :class:`~bot.services.currency_rates.RateCache` with the row's
+    ``created_at`` date.  Rows with ``amount IS NULL`` are skipped.
 
     Returns:
-        Словарь {user_id: total_amount}
+        Dict ``{user_id: total_base_amount}``.
     """
     from sqlalchemy import extract
 
+    from bot.db.repositories.currencies import list_currencies
+    from bot.services.currency_rates import RateCache
+
     result = await session.execute(
-        select(Message.user_id, Message.text)
+        select(
+            Message.user_id,
+            Message.amount,
+            Message.currency_id,
+            Message.created_at,
+        )
+        .where(Message.amount.is_not(None))
         .where(extract("year", Message.created_at) == year)
         .where(extract("month", Message.created_at) == month)
     )
     rows = result.all()
 
+    if not rows:
+        return {}
+
+    # Build a currency id → Currency map for all referenced currencies
+    all_currencies = {c.id: c for c in await list_currencies(session)}
+    cache = RateCache(session)
+
     user_totals: dict[int, Decimal] = {}
     for row in rows:
-        user_id = row.user_id
-        parts = row.text.rsplit(maxsplit=1)
-        if len(parts) == 2:
-            try:
-                amount = Decimal(parts[1].replace(",", "."))
-                user_totals[user_id] = user_totals.get(user_id, Decimal("0")) + amount
-            except Exception:
-                pass
+        user_id = int(row.user_id)
+        amount = Decimal(str(row.amount))
+        currency_id = row.currency_id
+        created_date = row.created_at.date() if row.created_at else None
+
+        if currency_id is not None and created_date is not None:
+            currency = all_currencies.get(currency_id)
+            if currency is not None:
+                amount = await cache.compute_base_amount(amount, currency, created_date)
+
+        user_totals[user_id] = user_totals.get(user_id, Decimal("0")) + amount
 
     return user_totals
+
+
+async def bulk_update_messages_currency(
+    session: AsyncSession,
+    message_ids: list[int],
+    new_currency_id: int | None,
+) -> int:
+    """Обновляет currency_id для нескольких сообщений.
+
+    Accepts ``None`` to clear the currency (set to NULL).
+
+    Returns:
+        Количество обновлённых записей
+    """
+    from sqlalchemy import update
+    from sqlalchemy.engine import Result
+
+    result: Result[Any] = await session.execute(
+        update(Message)
+        .where(Message.id.in_(message_ids))
+        .values(currency_id=new_currency_id)
+    )
+    return result.rowcount or 0  # type: ignore[attr-defined]
 
 
 async def get_available_months(session: AsyncSession) -> list[tuple[int, int]]:

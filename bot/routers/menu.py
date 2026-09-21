@@ -9,6 +9,8 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from bot.db.dependencies import get_session
+from bot.db.models import Currency
+from bot.db.repositories.currencies import get_base_currency, list_currencies
 from bot.db.repositories.messages import (
     get_all_users_costs_by_month,
     get_available_months,
@@ -16,7 +18,8 @@ from bot.db.repositories.messages import (
     get_user_costs_by_month,
 )
 from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
-from bot.utils import format_amount
+from bot.services.currency_rates import RateCache
+from bot.utils import format_amount, format_cost_line
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -110,13 +113,27 @@ def build_summary_months_keyboard(available_months: list[tuple[int, int]]) -> In
 
 
 def format_month_report(
-    costs: list[tuple[str, Decimal, datetime]],
+    costs: list[tuple[str, Decimal, datetime, int | None]],
     year: int,
     month: int,
     user_name: str,
     is_own: bool,
+    base_currency_code: str = "RUB",
+    currency_map: dict | None = None,
+    base_amounts: dict[int, Decimal] | None = None,
 ) -> str:
-    """Форматирует отчёт по расходам за месяц."""
+    """Форматирует отчёт по расходам за месяц.
+
+    Args:
+        costs: list of ``(name, amount, created_at, currency_id)`` tuples.
+        year: report year.
+        month: report month.
+        user_name: display name for the user (shown for non-own reports).
+        is_own: ``True`` when the report is for the current user.
+        base_currency_code: ISO code of the base currency.
+        currency_map: ``{currency_id: Currency}`` for code look-up.
+        base_amounts: ``{index: base_amount}`` pre-computed per row.
+    """
     month_name = MONTH_NAMES[month]
     header = f"<b>{month_name} {year}</b>"
 
@@ -125,14 +142,29 @@ def format_month_report(
             return f"{header}\n\n📭 Нет расходов за этот период."
         return f"{header}\n\n📭 У пользователя {user_name} нет расходов за этот период."
 
-    total = sum((amount for _, amount, _ in costs), Decimal(0))
+    total: Decimal = sum(
+        ((base_amounts or {}).get(idx, amount) for idx, (_, amount, _, _) in enumerate(costs)),
+        Decimal("0"),
+    )
 
-    lines = [header, "", f"<b>Всего:</b> {format_amount(total, sep='_')}", ""]
+    lines = [header, "", f"<b>Всего:</b> {format_amount(total, sep='_')} {base_currency_code}", ""]
 
-    # Сортируем по дате по возрастанию (costs уже отсортированы в репозитории)
-    for name, amount, date in costs:
-        date_str = date.strftime("%d")
-        lines.append(f"{date_str}: {name} {format_amount(amount, sep='_')}")
+    for idx, (name, amount, dt, currency_id) in enumerate(costs):
+        date_str = dt.strftime("%d")
+        cur_code = base_currency_code
+        if currency_id is not None and currency_map:
+            currency = currency_map.get(currency_id)
+            if currency:
+                cur_code = str(currency.code)
+        base_amount = (base_amounts or {}).get(idx, amount)
+        cost_line = format_cost_line(
+            name=name,
+            amount=amount,
+            currency_code=cur_code,
+            base_currency_code=base_currency_code,
+            base_amount=base_amount,
+        )
+        lines.append(f"{date_str}: {cost_line}")
 
     return "\n".join(lines)
 
@@ -338,8 +370,35 @@ async def _show_month_report(
             user_name = str(user.name) if user else str(user_id)
         else:
             user_name = ""
+        base_currency = await get_base_currency(session)
+        base_currency_code = str(base_currency.code) if base_currency else "RUB"
+        currencies = await list_currencies(session)
+        currency_map: dict[int, Currency] = {int(c.id): c for c in currencies}
+        cache = RateCache(session)
 
-    report = format_month_report(costs, year, month, user_name, is_own)
+        base_amounts: dict[int, Decimal] = {}
+        for idx, (name, amount, dt, currency_id) in enumerate(costs):
+            if currency_id is not None:
+                currency = currency_map.get(currency_id)
+                if currency is not None:
+                    base_amounts[idx] = await cache.compute_base_amount(
+                        amount, currency, dt.date()
+                    )
+                else:
+                    base_amounts[idx] = amount
+            else:
+                base_amounts[idx] = amount
+
+    report = format_month_report(
+        costs,
+        year,
+        month,
+        user_name,
+        is_own,
+        base_currency_code=base_currency_code,
+        currency_map=currency_map,
+        base_amounts=base_amounts,
+    )
 
     await callback.answer()
     await callback.message.answer(report)

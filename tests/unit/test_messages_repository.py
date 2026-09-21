@@ -79,9 +79,9 @@ class TestGetUserCostsStats:
         now = datetime.now()
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=now),
-            MagicMock(text="Хлеб 50.50", created_at=now),
-            MagicMock(text="Сыр 200,25", created_at=now),
+            MagicMock(amount=Decimal("100"), created_at=now),
+            MagicMock(amount=Decimal("50.50"), created_at=now),
+            MagicMock(amount=Decimal("200.25"), created_at=now),
         ]
         mock_session.execute.return_value = mock_result
 
@@ -96,9 +96,9 @@ class TestGetUserCostsStats:
         now = datetime.now()
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=now),
-            MagicMock(text="Невалидная строка", created_at=now),
-            MagicMock(text="Хлеб abc", created_at=now),
+            MagicMock(amount=Decimal("100"), created_at=now),
+            MagicMock(amount=None, created_at=now),
+            MagicMock(amount=None, created_at=now),
         ]
         mock_session.execute.return_value = mock_result
 
@@ -114,9 +114,9 @@ class TestGetUserCostsStats:
         last_date = datetime(2026, 1, 31, 20, 0)
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=first_date),
-            MagicMock(text="Хлеб 50", created_at=datetime(2026, 1, 15)),
-            MagicMock(text="Сыр 200", created_at=last_date),
+            MagicMock(amount=Decimal("100"), created_at=first_date),
+            MagicMock(amount=Decimal("50"), created_at=datetime(2026, 1, 15)),
+            MagicMock(amount=Decimal("200"), created_at=last_date),
         ]
         mock_session.execute.return_value = mock_result
 
@@ -146,16 +146,16 @@ class TestGetUserRecentCosts:
         now = datetime.now()
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=now),
-            MagicMock(text="Хлеб белый 50.50", created_at=now),
+            MagicMock(text="Молоко 100", amount=Decimal("100"), created_at=now, currency_id=None),
+            MagicMock(text="Хлеб белый 50.50", amount=Decimal("50.50"), created_at=now, currency_id=None),
         ]
         mock_session.execute.return_value = mock_result
 
         costs = await get_user_recent_costs(mock_session, user_id=123)
 
         assert len(costs) == 2
-        assert costs[0] == ("Молоко", Decimal("100"), now)
-        assert costs[1] == ("Хлеб белый", Decimal("50.50"), now)
+        assert costs[0] == ("Молоко", Decimal("100"), now, None)
+        assert costs[1] == ("Хлеб белый", Decimal("50.50"), now, None)
 
     @pytest.mark.asyncio
     async def test_skips_invalid_format(self, mock_session):
@@ -163,9 +163,7 @@ class TestGetUserRecentCosts:
         now = datetime.now()
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=now),
-            MagicMock(text="Невалидная", created_at=now),
-            MagicMock(text="Хлеб abc", created_at=now),
+            MagicMock(text="Молоко 100", amount=Decimal("100"), created_at=now, currency_id=None),
         ]
         mock_session.execute.return_value = mock_result
 
@@ -180,7 +178,7 @@ class TestGetUserRecentCosts:
         now = datetime.now()
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100,50", created_at=now),
+            MagicMock(text="Молоко 100,50", amount=Decimal("100.50"), created_at=now, currency_id=None),
         ]
         mock_session.execute.return_value = mock_result
 
@@ -235,16 +233,16 @@ class TestGetUserCostsByMonth:
         jan_date = datetime(2026, 1, 15)
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=jan_date),
-            MagicMock(text="Хлеб 50", created_at=jan_date),
+            MagicMock(text="Молоко 100", amount=Decimal("100"), created_at=jan_date, currency_id=None),
+            MagicMock(text="Хлеб 50", amount=Decimal("50"), created_at=jan_date, currency_id=None),
         ]
         mock_session.execute.return_value = mock_result
 
         costs = await get_user_costs_by_month(mock_session, user_id=123, year=2026, month=1)
 
         assert len(costs) == 2
-        assert costs[0] == ("Молоко", Decimal("100"), jan_date)
-        assert costs[1] == ("Хлеб", Decimal("50"), jan_date)
+        assert costs[0] == ("Молоко", Decimal("100"), jan_date, None)
+        assert costs[1] == ("Хлеб", Decimal("50"), jan_date, None)
 
     @pytest.mark.asyncio
     async def test_skips_invalid_format(self, mock_session):
@@ -252,8 +250,7 @@ class TestGetUserCostsByMonth:
         jan_date = datetime(2026, 1, 15)
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(text="Молоко 100", created_at=jan_date),
-            MagicMock(text="Невалидная строка", created_at=jan_date),
+            MagicMock(text="Молоко 100", amount=Decimal("100"), created_at=jan_date, currency_id=None),
         ]
         mock_session.execute.return_value = mock_result
 
@@ -420,6 +417,51 @@ class TestBulkUpdateMessagesUser:
         assert count == 0
 
 
+class TestBulkUpdateMessagesCurrency:
+    """Tests for bulk_update_messages_currency function."""
+
+    @pytest.mark.asyncio
+    async def test_updates_currency_for_given_ids(self, mock_session):
+        """Updates currency_id for messages with specified IDs."""
+        from bot.db.repositories.messages import bulk_update_messages_currency
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 3
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_currency(mock_session, [1, 2, 3], new_currency_id=5)
+
+        assert count == 3
+        mock_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_clears_currency_when_none(self, mock_session):
+        """Accepts None to clear currency_id (set to NULL)."""
+        from bot.db.repositories.messages import bulk_update_messages_currency
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 2
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_currency(mock_session, [1, 2], new_currency_id=None)
+
+        assert count == 2
+        mock_session.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_returns_zero_when_no_rows_updated(self, mock_session):
+        """Returns 0 when no rows were updated."""
+        from bot.db.repositories.messages import bulk_update_messages_currency
+
+        result_mock = MagicMock()
+        result_mock.rowcount = 0
+        mock_session.execute = AsyncMock(return_value=result_mock)
+
+        count = await bulk_update_messages_currency(mock_session, [999], new_currency_id=1)
+
+        assert count == 0
+
+
 class TestGetAllUsersCostsByMonth:
     """Tests for get_all_users_costs_by_month function."""
 
@@ -443,10 +485,11 @@ class TestGetAllUsersCostsByMonth:
 
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(user_id=123, text="Молоко 100"),
-            MagicMock(user_id=123, text="Хлеб 50"),
-            MagicMock(user_id=456, text="Яблоки 75"),
+            MagicMock(user_id=123, amount=Decimal("100"), currency_id=None, created_at=datetime(2026, 1, 15)),
+            MagicMock(user_id=123, amount=Decimal("50"), currency_id=None, created_at=datetime(2026, 1, 15)),
+            MagicMock(user_id=456, amount=Decimal("75"), currency_id=None, created_at=datetime(2026, 1, 15)),
         ]
+        mock_result.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = mock_result
 
         totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)
@@ -460,9 +503,9 @@ class TestGetAllUsersCostsByMonth:
 
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(user_id=123, text="Молоко 100"),
-            MagicMock(user_id=123, text="Невалидная строка"),
+            MagicMock(user_id=123, amount=Decimal("100"), currency_id=None, created_at=datetime(2026, 1, 15)),
         ]
+        mock_result.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = mock_result
 
         totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)
@@ -476,8 +519,9 @@ class TestGetAllUsersCostsByMonth:
 
         mock_result = MagicMock()
         mock_result.all.return_value = [
-            MagicMock(user_id=123, text="Молоко 100,50"),
+            MagicMock(user_id=123, amount=Decimal("100.50"), currency_id=None, created_at=datetime(2026, 1, 15)),
         ]
+        mock_result.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = mock_result
 
         totals = await get_all_users_costs_by_month(mock_session, year=2026, month=1)

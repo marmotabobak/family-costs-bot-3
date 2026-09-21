@@ -61,4 +61,5 @@ build/
 .claude/
 .agents/
 .codex/
+.cursor/
 .playwright-mcp/

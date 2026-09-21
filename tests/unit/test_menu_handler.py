@@ -142,23 +142,23 @@ class TestFormatMonthReport:
     def test_report_with_costs(self):
         """Отчёт с расходами."""
         costs = [
-            ("Продукты", Decimal("100.00"), datetime(2024, 1, 15, 10, 0)),
-            ("Транспорт", Decimal("50.50"), datetime(2024, 1, 20, 12, 30)),
-            ("\\-.!#_@:`<>/", Decimal("12.34"), datetime(2024, 1, 2, 3, 4)),
+            ("Продукты", Decimal("100.00"), datetime(2024, 1, 15, 10, 0), None),
+            ("Транспорт", Decimal("50.50"), datetime(2024, 1, 20, 12, 30), None),
+            ("\\-.!#_@:`<>/", Decimal("12.34"), datetime(2024, 1, 2, 3, 4), None),
         ]
         report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
 
         assert "<b>Январь 2024</b>" in report
         assert "<b>Всего:</b> 162.84" in report  # total (has fractional)
-        assert "15: Продукты 100" in report  # 100.00 → no .00
-        assert "20: Транспорт 50.50" in report
-        assert "2: \\-.!#_@:`<>/ 12.34" in report
+        assert "15: Продукты: 100 RUB" in report
+        assert "20: Транспорт: 50.50 RUB" in report
+        assert "2: \\-.!#_@:`<>/: 12.34 RUB" in report
 
     def test_report_with_negative_amount(self):
         """Отрицательная сумма (корректировка) отображается корректно."""
         costs = [
-            ("Продукты", Decimal("200"), datetime(2024, 1, 10)),
-            ("корректировка", Decimal("-50"), datetime(2024, 1, 11)),
+            ("Продукты", Decimal("200"), datetime(2024, 1, 10), None),
+            ("корректировка", Decimal("-50"), datetime(2024, 1, 11), None),
         ]
         report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
 
@@ -169,8 +169,8 @@ class TestFormatMonthReport:
     def test_report_with_same_day_expenses(self):
         """Несколько расходов в один день — все отображаются."""
         costs = [
-            ("Кофе", Decimal("100"), datetime(2024, 1, 15, 9, 0)),
-            ("Обед", Decimal("250"), datetime(2024, 1, 15, 13, 0)),
+            ("Кофе", Decimal("100"), datetime(2024, 1, 15, 9, 0), None),
+            ("Обед", Decimal("250"), datetime(2024, 1, 15, 13, 0), None),
         ]
         report = format_month_report(costs, year=2024, month=1, user_name="", is_own=True)
 
@@ -328,7 +328,16 @@ class TestHandleUserCosts:
     @pytest.mark.asyncio
     async def test_shows_period_selection_for_target_user(self, callback):
         """Показывает выбор периода для целевого пользователя."""
-        await handle_user_costs(callback)
+        mock_session = AsyncMock()
+
+        with (
+            patch("bot.routers.menu.get_session") as mock_get_session,
+            patch("bot.routers.menu.get_user_by_telegram_id") as mock_get_user,
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_get_user.return_value = None
+
+            await handle_user_costs(callback)
 
         callback.answer.assert_called_once()
         callback.message.answer.assert_called_once()
@@ -374,14 +383,18 @@ class TestHandlePeriodSelection:
         callback.data = f"{CALLBACK_PERIOD_PREFIX}123:this_month"
 
         mock_session = AsyncMock()
-        mock_costs = [("Продукты", Decimal("100.00"), datetime.now())]
+        mock_costs = [("Продукты", Decimal("100.00"), datetime.now(), None)]
 
         with (
             patch("bot.routers.menu.get_session") as mock_get_session,
             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+            patch("bot.routers.menu.get_base_currency") as mock_base_currency,
+            patch("bot.routers.menu.list_currencies") as mock_list_currencies,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_period_selection(callback)
 
@@ -451,14 +464,18 @@ class TestHandlePeriodSelection:
         callback.data = f"{CALLBACK_PERIOD_PREFIX}123:prev_month"
 
         mock_session = AsyncMock()
-        mock_costs = [("Продукты", Decimal("100.00"), datetime.now())]
+        mock_costs = [("Продукты", Decimal("100.00"), datetime.now(), None)]
 
         with (
             patch("bot.routers.menu.get_session") as mock_get_session,
             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+            patch("bot.routers.menu.get_base_currency") as mock_base_currency,
+            patch("bot.routers.menu.list_currencies") as mock_list_currencies,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_period_selection(callback)
 
@@ -476,6 +493,8 @@ class TestHandlePeriodSelection:
         with (
             patch("bot.routers.menu.get_session") as mock_get_session,
             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+            patch("bot.routers.menu.get_base_currency") as mock_base_currency,
+            patch("bot.routers.menu.list_currencies") as mock_list_currencies,
             patch("bot.routers.menu.datetime") as mock_datetime,
         ):
             mock_now = MagicMock()
@@ -485,6 +504,8 @@ class TestHandlePeriodSelection:
 
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_period_selection(callback)
 
@@ -530,14 +551,18 @@ class TestHandleMonthSelection:
     async def test_shows_month_report(self, callback):
         """Показывает отчёт за выбранный месяц."""
         mock_session = AsyncMock()
-        mock_costs = [("Продукты", Decimal("100.00"), datetime(2024, 1, 15))]
+        mock_costs = [("Продукты", Decimal("100.00"), datetime(2024, 1, 15), None)]
 
         with (
             patch("bot.routers.menu.get_session") as mock_get_session,
             patch("bot.routers.menu.get_user_costs_by_month") as mock_get_costs,
+            patch("bot.routers.menu.get_base_currency") as mock_base_currency,
+            patch("bot.routers.menu.list_currencies") as mock_list_currencies,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_get_costs.return_value = mock_costs
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_month_selection(callback)
 

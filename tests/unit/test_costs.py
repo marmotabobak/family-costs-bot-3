@@ -96,6 +96,7 @@ class TestParseMessageToCost:
         message = MagicMock()
         message.id = 1
         message.text = "Молоко 100"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -109,6 +110,7 @@ class TestParseMessageToCost:
         message = MagicMock()
         message.id = 1
         message.text = "Хлеб белый нарезной 50.50"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -122,6 +124,7 @@ class TestParseMessageToCost:
         message = MagicMock()
         message.id = 1
         message.text = "Сыр 200,25"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -134,6 +137,7 @@ class TestParseMessageToCost:
         message = MagicMock()
         message.id = 1
         message.text = "Возврат -50"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -147,6 +151,7 @@ class TestParseMessageToCost:
         message = MagicMock()
         message.id = 1
         message.text = "Невалидная строка"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -160,6 +165,7 @@ class TestParseMessageToCost:
         message = MagicMock()
         message.id = 1
         message.text = "Молоко abc"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -636,6 +642,7 @@ class TestEdgeCases:
         message = MagicMock()
         message.id = 1
         message.text = ""
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -649,6 +656,7 @@ class TestEdgeCases:
         message = MagicMock()
         message.id = 1
         message.text = "   "
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -661,6 +669,7 @@ class TestEdgeCases:
         message = MagicMock()
         message.id = 1
         message.text = "Большая покупка 999999999.99"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -673,6 +682,7 @@ class TestEdgeCases:
         message = MagicMock()
         message.id = 1
         message.text = "Копейка 0.01"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 
@@ -685,6 +695,7 @@ class TestEdgeCases:
         message = MagicMock()
         message.id = 1
         message.text = "Кафе ☕ завтрак 350"
+        message.amount = None
         message.user_id = 123
         message.created_at = datetime.now()
 

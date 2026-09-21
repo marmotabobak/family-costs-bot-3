@@ -26,7 +26,8 @@ pytestmark = pytest.mark.serial
 @pytest.fixture
 def client():
     """Create test client."""
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture(autouse=True)
@@ -123,6 +124,8 @@ class TestAuthenticationFlow:
             with (
                 patch("bot.web.costs.get_all_costs_paginated", return_value=mock_paginated),
                 patch("bot.web.costs.get_all_users", new=AsyncMock(return_value=[])),
+                patch("bot.web.costs.list_currencies", new=AsyncMock(return_value=[])),
+                patch("bot.web.costs.get_base_currency", new=AsyncMock(return_value=MagicMock(code="RUB", id=1, is_base=True))),
             ):
                 response = client.get("/costs")
                 assert response.status_code == 200

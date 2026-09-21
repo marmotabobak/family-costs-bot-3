@@ -1,0 +1,126 @@
+{% extends "costs/base.html" %}
+
+{% block title %}Курсы {{ currency.code }}{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>Курсы валюты {{ currency.code }}</h2>
+        <a href="{{ root_path }}/config/currencies" class="btn btn-secondary">← Валюты</a>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {# ----- Dated rates list ----- #}
+    {% if rates %}
+    <table class="costs-table">
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Курс</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for r in rates %}
+            <tr>
+                <td>{{ r.rate_date.strftime('%d.%m.%Y') }}</td>
+                <td class="amount">
+                    <span id="rate-display-{{ r.id }}">{{ r.rate|format_rate }}</span>
+                    <input type="text" id="rate-input-{{ r.id }}" value="{{ r.rate|format_rate }}"
+                           class="form-input rate-inline-input" style="display:none; width:10ch">
+                    &nbsp;<a href="#" id="rate-edit-{{ r.id }}" class="link-action"
+                             onclick="startEditRate({{ r.id }}); return false;">Изменить</a>
+                    <a href="#" id="rate-save-{{ r.id }}" class="link-action" style="display:none"
+                       onclick="saveRate({{ r.id }}); return false;">Сохранить</a>
+                </td>
+                <td class="actions">
+                    <form action="{{ root_path }}/config/currencies/{{ currency.id }}/rates/{{ r.id }}/delete"
+                          method="post" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn btn-danger btn-small"
+                                onclick="return confirm('Удалить курс на {{ r.rate_date.strftime("%d.%m.%Y") }}?')">
+                            Удалить
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-message">Нет курсов. Добавьте первый.</p>
+    {% endif %}
+
+    {# ----- Add rate form ----- #}
+    <hr>
+    <h3>Добавить курс</h3>
+    {% if currency.is_base %}
+    <p>Для базовой валюты нельзя добавлять dated-курсы.</p>
+    {% else %}
+    <form action="{{ root_path }}/config/currencies/{{ currency.id }}/rates" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label for="rate_date">Дата:</label>
+            <input type="date" id="rate_date" name="rate_date" required class="form-input" value="{{ today }}">
+        </div>
+        <div class="form-group">
+            <label for="rate">Курс:</label>
+            <input type="text" id="rate" name="rate" required class="form-input" placeholder="95.5">
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Добавить</button>
+        </div>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+    const CSRF = {{ csrf_token|tojson }};
+    const ROOT = {{ (root_path ~ '/config/currencies/' ~ currency.id ~ '/rates')|tojson }};
+
+    function startEditRate(id) {
+        document.getElementById('rate-display-' + id).style.display = 'none';
+        document.getElementById('rate-input-' + id).style.display = 'inline-block';
+        document.getElementById('rate-edit-' + id).style.display = 'none';
+        document.getElementById('rate-save-' + id).style.display = 'inline';
+    }
+
+    function stopEditRate(id, newText) {
+        document.getElementById('rate-display-' + id).textContent = newText;
+        document.getElementById('rate-display-' + id).style.display = 'inline';
+        document.getElementById('rate-input-' + id).style.display = 'none';
+        document.getElementById('rate-input-' + id).value = newText;
+        document.getElementById('rate-edit-' + id).style.display = 'inline';
+        document.getElementById('rate-save-' + id).style.display = 'none';
+    }
+
+    window.startEditRate = startEditRate;
+
+    window.saveRate = async function(id) {
+        const input = document.getElementById('rate-input-' + id);
+        const value = input.value.trim();
+        try {
+            const resp = await fetch(ROOT + '/' + id + '/update', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'rate=' + encodeURIComponent(value) + '&csrf_token=' + encodeURIComponent(CSRF)
+            });
+            const data = await resp.json();
+            if (data.ok) {
+                stopEditRate(id, data.formatted);
+            } else {
+                alert(data.error || 'Ошибка сохранения');
+            }
+        } catch (e) {
+            alert('Ошибка сети');
+        }
+    };
+})();
+</script>
+{% endblock %}

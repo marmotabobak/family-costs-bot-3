@@ -7,7 +7,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -180,6 +180,28 @@ def set_flash_message(request: Request, message: str, msg_type: str = "info") ->
     if session:
         session["flash_message"] = message
         session["flash_type"] = msg_type
+
+
+# ---------------------------------------------------------------------------
+# FastAPI dependencies
+# ---------------------------------------------------------------------------
+
+
+def admin_required(request: Request) -> None:
+    """FastAPI dependency that enforces admin access.
+
+    Raises :class:`fastapi.HTTPException` with status 403 when:
+    - the request has no valid authenticated session, or
+    - the authenticated user does not have the ``admin`` role.
+
+    Intended usage::
+
+        router = APIRouter(dependencies=[Depends(admin_required)])
+    """
+    if not is_authenticated(request):
+        raise HTTPException(status_code=403, detail="Authentication required")
+    if not is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin access required")
 
 
 # --- Auth routes ---

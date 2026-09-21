@@ -83,7 +83,7 @@ logs-web:
 # Migrations (Alembic)
 # -----------------------------------------------------------
 
-## Apply migrations
+## Apply migrations to the application database (DATABASE_URL from .env)
 .PHONY: migrate
 migrate:
 	alembic upgrade head

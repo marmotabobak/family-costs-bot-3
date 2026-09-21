@@ -110,6 +110,8 @@ class FakeDB:
         m.user_id = user_id
         m.text = text
         m.created_at = created_at or datetime.now()
+        m.amount = None
+        m.currency_id = None
         return m
 
     async def get_all_costs_paginated(self, session, page=1, per_page=20, order_by="created_at", order_dir="desc"):
@@ -125,13 +127,13 @@ class FakeDB:
     async def get_message_by_id(self, session, msg_id):
         return self.messages.get(msg_id)
 
-    async def save_message(self, session, user_id, text, created_at=None):
+    async def save_message(self, session, user_id, text, created_at=None, amount=None, currency_id=None):
         mid = self._next_mid
         self._next_mid += 1
         self.messages[mid] = self._make_msg(mid, user_id, text, created_at)
         return self.messages[mid]
 
-    async def update_message(self, session, message_id, text, user_id, created_at=None):
+    async def update_message(self, session, message_id, text, user_id, created_at=None, amount=None, currency_id=None):
         m = self.messages.get(message_id)
         if not m:
             return None
@@ -261,6 +263,8 @@ def costs_patches(db):
         patch("bot.web.costs.bulk_update_messages_date", new=AsyncMock(side_effect=db.bulk_update_messages_date)),
         patch("bot.web.costs.bulk_update_messages_user", new=AsyncMock(side_effect=db.bulk_update_messages_user)),
         patch("bot.web.costs.get_all_users", new=AsyncMock(side_effect=db.get_all_users)),
+        patch("bot.web.costs.list_currencies", new=AsyncMock(return_value=[])),
+        patch("bot.web.costs.get_base_currency", new=AsyncMock(return_value=MagicMock(code="RUB", id=1, is_base=True))),
     ):
         yield
 
@@ -1565,6 +1569,14 @@ class TestBootstrapAndUserLifecycle:
             patch(
                 "bot.routers.messages.save_message",
                 new=AsyncMock(side_effect=db.save_message),
+            ),
+            patch(
+                "bot.routers.messages.get_base_currency",
+                new=AsyncMock(return_value=MagicMock(code="RUB", id=1, is_base=True)),
+            ),
+            patch(
+                "bot.routers.messages.list_currencies",
+                new=AsyncMock(return_value=[]),
             ),
         ):
             mock_get_session.return_value.__aenter__.return_value = AsyncMock()
