@@ -26,14 +26,14 @@
         <tbody>
             {% for r in rates %}
             <tr>
-                <td>{{ r.rate_date }}</td>
+                <td>{{ r.rate_date.strftime('%d.%m.%Y') }}</td>
                 <td class="amount">{{ r.rate|format_amount }}</td>
                 <td class="actions">
                     <form action="{{ root_path }}/config/currencies/{{ currency.id }}/rates/{{ r.id }}/delete"
                           method="post" class="inline-form">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-danger btn-small"
-                                onclick="return confirm('Удалить курс на {{ r.rate_date }}?')">
+                                onclick="return confirm('Удалить курс на {{ r.rate_date.strftime("%d.%m.%Y") }}?')">
                             Удалить
                         </button>
                     </form>

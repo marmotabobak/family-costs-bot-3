@@ -252,7 +252,9 @@
             return;
         }
         const count = checked.length;
-        if (!confirm('Изменить дату для ' + count + ' записей на ' + dateInput.value + '?')) {
+        const _dp = dateInput.value.split('-');
+        const displayDate = _dp.length === 3 ? _dp[2] + '.' + _dp[1] + '.' + _dp[0] : dateInput.value;
+        if (!confirm('Изменить дату для ' + count + ' записей на ' + displayDate + '?')) {
             e.preventDefault();
             return;
         }

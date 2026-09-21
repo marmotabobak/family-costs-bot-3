@@ -6,6 +6,7 @@
     <title>{% block title %}Панель управления{% endblock %} | Family Costs Bot</title>
     <link rel="stylesheet" href="{{ root_path }}/static/style.css">
     <link rel="stylesheet" href="{{ root_path }}/static/costs.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
 </head>
 <body>
     <div class="container">
@@ -37,5 +38,19 @@
             <p>Панель управления</p>
         </footer>
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js"></script>
+    <script>
+    flatpickr.localize(flatpickr.l10ns.ru);
+    document.querySelectorAll('input[type="date"]').forEach(function(el) {
+        flatpickr(el, {
+            dateFormat: "Y-m-d",
+            altInput: true,
+            altFormat: "d.m.Y",
+            allowInput: true
+        });
+    });
+    </script>
+    {% block scripts %}{% endblock %}
 </body>
 </html>
