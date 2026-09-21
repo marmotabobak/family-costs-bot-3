@@ -377,9 +377,9 @@ class TestRepositoryFunctions:
 
         user_id = 10001
         async with get_session() as session:
-            await save_message(session, user_id, "Test1 100")
-            await save_message(session, user_id, "Test2 200")
-            await save_message(session, user_id, "Test3 300")
+            await save_message(session, user_id, "Test1 100", amount=Decimal("100"))
+            await save_message(session, user_id, "Test2 200", amount=Decimal("200"))
+            await save_message(session, user_id, "Test3 300", amount=Decimal("300"))
             await session.commit()
 
             stats = await get_user_costs_stats(session, user_id)
@@ -396,9 +396,9 @@ class TestRepositoryFunctions:
         user_id = 10002
         base_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         async with get_session() as session:
-            await save_message(session, user_id, "First 100", created_at=base_time)
-            await save_message(session, user_id, "Second 200", created_at=base_time.replace(second=1))
-            await save_message(session, user_id, "Third 300", created_at=base_time.replace(second=2))
+            await save_message(session, user_id, "First 100", created_at=base_time, amount=Decimal("100"))
+            await save_message(session, user_id, "Second 200", created_at=base_time.replace(second=1), amount=Decimal("200"))
+            await save_message(session, user_id, "Third 300", created_at=base_time.replace(second=2), amount=Decimal("300"))
             await session.commit()
 
             costs = await get_user_recent_costs(session, user_id, limit=2)
@@ -439,9 +439,9 @@ class TestRepositoryFunctions:
 
         user_id = 10004
         async with get_session() as session:
-            await save_message(session, user_id, "Valid 100")
-            await save_message(session, user_id, "InvalidFormat")  # Нет суммы
-            await save_message(session, user_id, "Another 200")
+            await save_message(session, user_id, "Valid 100", amount=Decimal("100"))
+            await save_message(session, user_id, "InvalidFormat")  # Нет суммы → amount=NULL
+            await save_message(session, user_id, "Another 200", amount=Decimal("200"))
             await session.commit()
 
             stats = await get_user_costs_stats(session, user_id)
@@ -456,9 +456,9 @@ class TestRepositoryFunctions:
         user_id = 10005
         base_time = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         async with get_session() as session:
-            await save_message(session, user_id, "Valid 100", created_at=base_time)
-            await save_message(session, user_id, "InvalidFormat", created_at=base_time.replace(second=1))  # Нет суммы
-            await save_message(session, user_id, "Another 200", created_at=base_time.replace(second=2))
+            await save_message(session, user_id, "Valid 100", created_at=base_time, amount=Decimal("100"))
+            await save_message(session, user_id, "InvalidFormat", created_at=base_time.replace(second=1))  # amount=NULL
+            await save_message(session, user_id, "Another 200", created_at=base_time.replace(second=2), amount=Decimal("200"))
             await session.commit()
 
             costs = await get_user_recent_costs(session, user_id, limit=10)
@@ -475,9 +475,9 @@ class TestRepositoryFunctions:
         user_id = 10006
         base_time = datetime(2024, 6, 15, tzinfo=timezone.utc)
         async with get_session() as session:
-            await save_message(session, user_id, "Valid 100", created_at=base_time)
-            await save_message(session, user_id, "InvalidFormat", created_at=base_time.replace(day=16))
-            await save_message(session, user_id, "Another 200", created_at=base_time.replace(day=17))
+            await save_message(session, user_id, "Valid 100", created_at=base_time, amount=Decimal("100"))
+            await save_message(session, user_id, "InvalidFormat", created_at=base_time.replace(day=16))  # amount=NULL
+            await save_message(session, user_id, "Another 200", created_at=base_time.replace(day=17), amount=Decimal("200"))
             await session.commit()
 
             costs = await get_user_costs_by_month(session, user_id, 2024, 6)

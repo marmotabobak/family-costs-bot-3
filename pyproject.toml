@@ -83,6 +83,7 @@ line-ending = "auto"
 [tool.mypy]
 python_version = "3.11"
 plugins = ["pydantic.mypy"]
+exclude = ["migrations"]
 ignore_missing_imports = true
 strict_optional = true
 warn_redundant_casts = true

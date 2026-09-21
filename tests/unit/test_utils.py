@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from bot.utils import format_amount, pluralize
+from bot.utils import format_amount, format_cost_line, pluralize
 
 
 class TestFormatAmount:
@@ -102,3 +102,73 @@ class TestPluralize:
         assert pluralize(-1, "расход", "расхода", "расходов") == "расход"
         assert pluralize(-2, "расход", "расхода", "расходов") == "расхода"
         assert pluralize(-5, "расход", "расхода", "расходов") == "расходов"
+
+
+class TestFormatCostLine:
+    """Task 5.4 — format_cost_line helper."""
+
+    def test_base_currency_no_bracket(self):
+        """When currency_code == base_currency_code → no bracket shown."""
+        line = format_cost_line(
+            name="coffee",
+            amount=Decimal("250"),
+            currency_code="RUB",
+            base_currency_code="RUB",
+            base_amount=Decimal("250"),
+        )
+        assert line == "coffee: 250 RUB"
+
+    def test_non_base_currency_shows_bracket(self):
+        """Non-base currency shows [<base_amount> <BASE_CODE>]."""
+        line = format_cost_line(
+            name="lunch",
+            amount=Decimal("10"),
+            currency_code="USD",
+            base_currency_code="RUB",
+            base_amount=Decimal("970"),
+        )
+        assert line == "lunch: 10 USD [970 RUB]"
+
+    def test_base_currency_thousands_formatting(self):
+        """Thousands are formatted with _ separator in bot mode."""
+        line = format_cost_line(
+            name="rent",
+            amount=Decimal("50000"),
+            currency_code="RUB",
+            base_currency_code="RUB",
+            base_amount=Decimal("50000"),
+        )
+        assert line == "rent: 50_000 RUB"
+
+    def test_non_base_thousands_in_base_amount(self):
+        """Thousands in base_amount are also formatted."""
+        line = format_cost_line(
+            name="flight",
+            amount=Decimal("1000"),
+            currency_code="USD",
+            base_currency_code="RUB",
+            base_amount=Decimal("97000"),
+        )
+        assert line == "flight: 1_000 USD [97_000 RUB]"
+
+    def test_non_base_base_amount_rounded_to_two_decimals(self):
+        """base_amount is quantized to 2 decimal places."""
+        line = format_cost_line(
+            name="item",
+            amount=Decimal("1"),
+            currency_code="USD",
+            base_currency_code="RUB",
+            base_amount=Decimal("90.1234"),
+        )
+        assert "[90.12 RUB]" in line
+
+    def test_negative_amount_non_base(self):
+        """Negative amounts are formatted correctly."""
+        line = format_cost_line(
+            name="refund",
+            amount=Decimal("-10"),
+            currency_code="USD",
+            base_currency_code="RUB",
+            base_amount=Decimal("-970"),
+        )
+        assert line == "refund: -10 USD [-970 RUB]"

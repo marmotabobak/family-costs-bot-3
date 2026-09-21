@@ -1,0 +1,104 @@
+{% extends "costs/base.html" %}
+
+{% block title %}Валюты{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header">
+        <h2>Конфигурация — Валюты</h2>
+        <a href="{{ root_path }}/costs" class="btn btn-secondary">← Расходы</a>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {% if edit_currency %}
+    {# ----- Edit default_rate form ----- #}
+    <h3>Редактировать валюту {{ edit_currency.code }}</h3>
+    <form action="{{ root_path }}/config/currencies/{{ edit_currency.id }}/edit" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label for="default_rate">Базовый курс (default_rate):</label>
+            <input type="text" id="default_rate" name="default_rate"
+                   value="{{ edit_currency.default_rate }}"
+                   class="form-input" required
+                   {% if edit_currency.is_base %}disabled{% endif %}>
+            {% if edit_currency.is_base %}
+            <small class="form-hint">Базовая валюта — курс всегда 1.</small>
+            {% endif %}
+        </div>
+        <div class="form-actions">
+            <a href="{{ root_path }}/config/currencies" class="btn btn-secondary">Отмена</a>
+            {% if not edit_currency.is_base %}
+            <button type="submit" class="btn btn-primary">Сохранить</button>
+            {% endif %}
+        </div>
+    </form>
+
+    {% else %}
+    {# ----- Currency list ----- #}
+    <table class="costs-table">
+        <thead>
+            <tr>
+                <th>Код</th>
+                <th>База</th>
+                <th>Курс по умолчанию</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for c in currencies %}
+            <tr>
+                <td><strong>{{ c.code }}</strong></td>
+                <td>{% if c.is_base %}<span class="badge badge-success">база</span>{% endif %}</td>
+                <td class="amount">{{ c.default_rate|format_amount }}</td>
+                <td class="actions">
+                    <a href="{{ root_path }}/config/currencies/{{ c.id }}/rates" class="btn btn-secondary btn-small">Курсы</a>
+                    <a href="{{ root_path }}/config/currencies/{{ c.id }}/edit" class="btn btn-secondary btn-small">Изменить</a>
+                    {% if not c.is_base %}
+                    <form action="{{ root_path }}/config/currencies/{{ c.id }}/promote" method="post" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn btn-secondary btn-small"
+                                onclick="return confirm('Сделать {{ c.code }} базовой валютой?')">
+                            Сделать базовой
+                        </button>
+                    </form>
+                    {% endif %}
+                    <form action="{{ root_path }}/config/currencies/{{ c.id }}/delete" method="post" class="inline-form">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="btn btn-danger btn-small"
+                                onclick="return confirm('Удалить валюту {{ c.code }}?')">
+                            Удалить
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4">Нет валют.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {# ----- Create form ----- #}
+    <hr>
+    <h3>Добавить валюту</h3>
+    <form action="{{ root_path }}/config/currencies" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-group">
+            <label for="code">Код (3 заглавные буквы):</label>
+            <input type="text" id="code" name="code" maxlength="3"
+                   pattern="[A-Z]{3}" required class="form-input" placeholder="USD">
+        </div>
+        <div class="form-group">
+            <label for="default_rate">Курс по умолчанию:</label>
+            <input type="text" id="default_rate" name="default_rate"
+                   required class="form-input" placeholder="90">
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Добавить</button>
+        </div>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

@@ -17,6 +17,7 @@
                 {% if is_admin %}
                 <a href="{{ root_path }}/users">Пользователи</a>
                 <a href="{{ root_path }}/logs">Логи</a>
+                <a href="{{ root_path }}/config/currencies">Конфигурация</a>
                 {% endif %}
                 <a href="{{ root_path }}/profile/change-password">Сменить пароль</a>
                 <span class="user-info">{{ user_name }}{% if is_admin %} (админ){% endif %}</span>

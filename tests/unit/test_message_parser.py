@@ -492,3 +492,61 @@ class TestParseMessageAmountEdgeCases:
         result = parse_message("Product 123.45")
         assert result is not None
         assert result.valid_lines[0].amount == Decimal("123.45")
+
+
+class TestParseMessageCurrencyBracket:
+    """Task 3.1 — Optional currency bracket ``[CUR]`` in message lines."""
+
+    def test_no_bracket_currency_code_is_none(self):
+        """'coffee 250' — no bracket → currency_code is None."""
+        result = parse_message("coffee 250")
+        assert result is not None
+        cost = result.valid_lines[0]
+        assert cost.currency_code is None
+        assert cost.name == "coffee"
+        assert cost.amount == Decimal("250")
+
+    def test_valid_bracket_extracted(self):
+        """'lunch 12.50 [USD]' → currency_code='USD'."""
+        result = parse_message("lunch 12.50 [USD]")
+        assert result is not None
+        cost = result.valid_lines[0]
+        assert cost.currency_code == "USD"
+        assert cost.name == "lunch"
+        assert cost.amount == Decimal("12.50")
+
+    def test_lowercase_bracket_invalid_line(self):
+        """'lunch 12.50 [usd]' → not matched (lowercase letters not allowed)."""
+        result = parse_message("lunch 12.50 [usd]")
+        # The line does not match MESSAGE_RE → treated as invalid
+        # If the whole message has no valid lines, result is None
+        assert result is None or len(result.valid_lines) == 0
+
+    def test_four_char_bracket_invalid_line(self):
+        """'lunch 12.50 [USDD]' → not matched (4 chars not 3)."""
+        result = parse_message("lunch 12.50 [USDD]")
+        assert result is None or len(result.valid_lines) == 0
+
+    def test_name_with_uppercase_suffix_no_bracket(self):
+        """'foo BAR 10' — name ends in uppercase word but no brackets → currency_code=None."""
+        result = parse_message("foo BAR 10")
+        assert result is not None
+        cost = result.valid_lines[0]
+        assert cost.currency_code is None
+        assert cost.name == "foo BAR"
+        assert cost.amount == Decimal("10")
+
+    def test_rub_bracket(self):
+        """'продукты 500 [RUB]' → currency_code='RUB'."""
+        result = parse_message("продукты 500 [RUB]")
+        assert result is not None
+        cost = result.valid_lines[0]
+        assert cost.currency_code == "RUB"
+
+    def test_negative_amount_with_bracket(self):
+        """'корректировка -100 [USD]' → amount=-100, currency_code='USD'."""
+        result = parse_message("корректировка -100 [USD]")
+        assert result is not None
+        cost = result.valid_lines[0]
+        assert cost.amount == Decimal("-100")
+        assert cost.currency_code == "USD"

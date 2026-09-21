@@ -10,8 +10,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Cost:
+    """Parsed cost line.
+
+    ``currency_code`` is ``None`` when no ``[CUR]`` bracket was present in the
+    original message line.  When present it is exactly 3 uppercase ASCII
+    letters (e.g. ``"USD"``).
+    """
+
     name: str
     amount: Decimal
+    currency_code: str | None = None
 
 
 @dataclass(frozen=True)
@@ -20,7 +28,11 @@ class ParseResult:
     invalid_lines: list[str]
 
 
-MESSAGE_RE = re.compile(r"^\s*(?P<text>.+?)\s+(?P<amount>[+-]?\d+(?:[.,]\d+)?)\s*$")
+# Optional trailing `` [CUR]`` where CUR is exactly 3 uppercase ASCII letters.
+MESSAGE_RE = re.compile(
+    r"^\s*(?P<text>.+?)\s+(?P<amount>[+-]?\d+(?:[.,]\d+)?)"
+    r"(?:\s+\[(?P<currency>[A-Z]{3})\])?\s*$"
+)
 
 
 def parse_message(message: str | None) -> ParseResult | None:
@@ -65,7 +77,12 @@ def parse_message(message: str | None) -> ParseResult | None:
             invalid_costs.append(raw_line)
             continue
 
-        cost = Cost(name=match.group("text").strip(), amount=amount)
+        currency_code: str | None = match.group("currency")  # None when not present
+        cost = Cost(
+            name=match.group("text").strip(),
+            amount=amount,
+            currency_code=currency_code,
+        )
         valid_costs.append(cost)
 
     if not valid_costs:

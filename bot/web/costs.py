@@ -13,6 +13,8 @@ from fastapi.templating import Jinja2Templates
 
 from bot.config import settings
 from bot.db.dependencies import get_session as get_db_session
+from bot.db.models import Currency
+from bot.db.repositories.currencies import get_base_currency, list_currencies
 from bot.db.repositories.messages import (
     bulk_delete_messages,
     bulk_update_messages_date,
@@ -25,6 +27,7 @@ from bot.db.repositories.messages import (
     update_message,
 )
 from bot.db.repositories.users import get_all_users
+from bot.services.currency_rates import RateCache
 from bot.utils import format_amount, pluralize
 from bot.web.auth import (
     get_csrf_token,
@@ -53,13 +56,17 @@ _DB_SORT_FIELDS = {"id", "created_at", "user_id"}
 
 @dataclass
 class ParsedCost:
-    """Parsed cost data from Message."""
+    """Parsed cost data from Message, enriched with base-currency amounts."""
 
     id: int
     name: str
     amount: Decimal
     user_id: int
     created_at: datetime
+    currency_id: int | None = None
+    currency_code: str | None = None
+    base_amount: Decimal = Decimal("0")
+    base_currency_code: str = "RUB"
 
 
 @dataclass
@@ -113,19 +120,46 @@ class CostsFilter:
         return "&".join(params)
 
 
-def parse_message_to_cost(message) -> ParsedCost:
-    """Parse Message object to ParsedCost with name and amount extracted."""
-    parts = message.text.rsplit(maxsplit=1)
-    if len(parts) == 2:
-        try:
-            amount = Decimal(parts[1].replace(",", "."))
-            name = parts[0]
-        except (InvalidOperation, ValueError):
+def parse_message_to_cost(
+    message,
+    currency_map: dict | None = None,
+    base_currency_code: str = "RUB",
+) -> ParsedCost:
+    """Convert a Message ORM object to a :class:`ParsedCost`.
+
+    Uses the structured ``amount`` column when available; falls back to
+    parsing ``text`` for legacy rows.
+
+    Args:
+        message: the ORM :class:`~bot.db.models.Message` instance.
+        currency_map: optional ``{currency_id: Currency}`` mapping used to
+            look up ``currency_code``; when ``None`` the code is not filled.
+        base_currency_code: ISO code of the base currency for display.
+    """
+    # Prefer structured column; fall back to text parsing for legacy rows
+    if message.amount is not None:
+        amount = Decimal(str(message.amount))
+        parts = message.text.rsplit(maxsplit=1)
+        name = parts[0] if len(parts) == 2 else message.text
+    else:
+        parts = message.text.rsplit(maxsplit=1)
+        if len(parts) == 2:
+            try:
+                amount = Decimal(parts[1].replace(",", "."))
+                name = parts[0]
+            except (InvalidOperation, ValueError):
+                name = message.text
+                amount = Decimal("0")
+        else:
             name = message.text
             amount = Decimal("0")
-    else:
-        name = message.text
-        amount = Decimal("0")
+
+    currency_id: int | None = message.currency_id
+    currency_code: str | None = None
+    if currency_map and currency_id is not None:
+        currency = currency_map.get(currency_id)
+        if currency:
+            currency_code = str(currency.code)
 
     return ParsedCost(
         id=message.id,
@@ -133,6 +167,10 @@ def parse_message_to_cost(message) -> ParsedCost:
         amount=amount,
         user_id=message.user_id,
         created_at=message.created_at,
+        currency_id=currency_id,
+        currency_code=currency_code,
+        base_amount=amount,  # will be recomputed by the caller
+        base_currency_code=base_currency_code,
     )
 
 
@@ -204,6 +242,7 @@ def render_form_error(
     cost: ParsedCost | None,
     form_data: dict,
     users: list,
+    currencies: list | None = None,
 ) -> HTMLResponse:
     """Helper to render form with error."""
     return templates.TemplateResponse(
@@ -216,6 +255,7 @@ def render_form_error(
             "form_data": form_data,
             "csrf_token": get_csrf_token(request),
             "users": users,
+            "currencies": currencies or [],
         },
     )
 
@@ -272,12 +312,35 @@ async def costs_list(
 
     async with get_db_session() as session:
         users = await get_all_users(session)
+        currencies_list = await list_currencies(session)
+        base_currency = await get_base_currency(session)
+        base_currency_code = str(base_currency.code) if base_currency else "RUB"
+        currency_map: dict[int, Currency] = {int(c.id): c for c in currencies_list}
+        cache = RateCache(session)
 
         # When filters are active, we need to fetch all data and filter in Python
         # because name/amount filters require parsing the text field
         if filters.is_active() or order_by not in _DB_SORT_FIELDS:
             all_messages = await get_all_messages(session)
-            all_items = [parse_message_to_cost(msg) for msg in all_messages]
+            all_items = [
+                parse_message_to_cost(msg, currency_map, base_currency_code)
+                for msg in all_messages
+            ]
+
+            # Compute base amounts
+            from datetime import date as _date
+            for item in all_items:
+                if item.currency_id is not None:
+                    currency = currency_map.get(item.currency_id)
+                    if currency is not None:
+                        item_date = item.created_at.date() if item.created_at else _date.today()
+                        item.base_amount = await cache.compute_base_amount(
+                            item.amount, currency, item_date
+                        )
+                    else:
+                        item.base_amount = item.amount
+                else:
+                    item.base_amount = item.amount
 
             # Apply filters
             all_items = _apply_filters(all_items, filters)
@@ -317,7 +380,22 @@ async def costs_list(
                 order_by=order_by,
                 order_dir=order_dir,
             )
-            items = [parse_message_to_cost(msg) for msg in paginated.items]
+            from datetime import date as _date
+            items = []
+            for msg in paginated.items:
+                pc = parse_message_to_cost(msg, currency_map, base_currency_code)
+                if pc.currency_id is not None:
+                    currency = currency_map.get(pc.currency_id)
+                    if currency is not None:
+                        item_date = pc.created_at.date() if pc.created_at else _date.today()
+                        pc.base_amount = await cache.compute_base_amount(
+                            pc.amount, currency, item_date
+                        )
+                    else:
+                        pc.base_amount = pc.amount
+                else:
+                    pc.base_amount = pc.amount
+                items.append(pc)
             costs = CostsResponse(
                 items=items,
                 total=paginated.total,
@@ -336,6 +414,8 @@ async def costs_list(
             "costs": costs,
             "users": users,
             "users_map": users_map,
+            "currencies": currencies_list,
+            "base_currency_code": base_currency_code,
             "flash_message": flash_message,
             "flash_type": flash_type,
             "csrf_token": get_csrf_token(request),
@@ -353,6 +433,8 @@ async def add_cost_form(request: Request):
         return RedirectResponse(url=f"{settings.web_root_path}/login", status_code=303)
 
     users = await _get_users_for_form()
+    async with get_db_session() as session:
+        currencies = await list_currencies(session)
 
     return templates.TemplateResponse(
         request,
@@ -362,6 +444,7 @@ async def add_cost_form(request: Request):
             "cost": None,
             "csrf_token": get_csrf_token(request),
             "users": users,
+            "currencies": currencies,
         },
     )
 
@@ -372,6 +455,7 @@ async def add_cost(
     name: str = Form(...),
     amount: str = Form(...),
     user_id: int = Form(...),
+    currency_id: int = Form(0),
     created_at: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -389,16 +473,32 @@ async def add_cost(
         "created_at": created_at,
     }
     users = await _get_users_for_form()
+    async with get_db_session() as session:
+        currencies = await list_currencies(session)
 
     # Validate amount
     try:
         amount_decimal = Decimal(amount.replace(",", "."))
     except (InvalidOperation, ValueError):
-        return render_form_error(request, "Некорректная сумма", None, form_data, users)
+        return render_form_error(request, "Некорректная сумма", None, form_data, users, currencies)
 
     # Validate user_id
     if user_id < 1:
-        return render_form_error(request, "User ID должен быть больше 0", None, form_data, users)
+        return render_form_error(request, "User ID должен быть больше 0", None, form_data, users, currencies)
+
+    # Validate currency_id
+    catalogue_ids = {c.id for c in currencies}
+    resolved_currency_id: int | None = None
+    if currency_id and currency_id in catalogue_ids:
+        resolved_currency_id = currency_id
+    elif currency_id and currency_id not in catalogue_ids:
+        return render_form_error(request, "Неизвестная валюта", None, form_data, users, currencies)
+    else:
+        # Default to base
+        async with get_db_session() as session:
+            base = await get_base_currency(session)
+            if base:
+                resolved_currency_id = int(base.id)
 
     # Parse datetime
     parsed_created_at = None
@@ -406,7 +506,7 @@ async def add_cost(
         try:
             parsed_created_at = datetime.fromisoformat(created_at)
         except ValueError:
-            return render_form_error(request, "Некорректная дата", None, form_data, users)
+            return render_form_error(request, "Некорректная дата", None, form_data, users, currencies)
 
     text = f"{name} {amount_decimal}"
 
@@ -417,6 +517,8 @@ async def add_cost(
                 user_id=user_id,
                 text=text,
                 created_at=parsed_created_at,
+                amount=amount_decimal,
+                currency_id=resolved_currency_id,
             )
             await session.commit()
             logger.info("Added new cost via web: %s", text)
@@ -424,7 +526,7 @@ async def add_cost(
             logger.exception("Error adding cost: %s", e)
             await session.rollback()
             return render_form_error(
-                request, "Ошибка сохранения в базу данных", None, form_data, users
+                request, "Ошибка сохранения в базу данных", None, form_data, users, currencies
             )
 
     set_flash_message(request, "Расход успешно добавлен", "success")
@@ -442,7 +544,9 @@ async def edit_cost_form(request: Request, cost_id: int):
         if not message:
             raise HTTPException(status_code=404, detail="Расход не найден")
 
-        cost = parse_message_to_cost(message)
+        currencies = await list_currencies(session)
+        currency_map: dict[int, Currency] = {int(c.id): c for c in currencies}
+        cost = parse_message_to_cost(message, currency_map)
         users = await get_all_users(session)
 
     # Non-admins can only edit their own costs
@@ -459,6 +563,7 @@ async def edit_cost_form(request: Request, cost_id: int):
             "cost": cost,
             "csrf_token": get_csrf_token(request),
             "users": users,
+            "currencies": currencies,
         },
     )
 
@@ -470,6 +575,7 @@ async def edit_cost(
     name: str = Form(...),
     amount: str = Form(...),
     user_id: int = Form(...),
+    currency_id: int = Form(0),
     created_at: str = Form(""),
     csrf_token: str = Form(""),
 ):
@@ -482,8 +588,10 @@ async def edit_cost(
 
     async with get_db_session() as session:
         users = await get_all_users(session)
+        currencies = await list_currencies(session)
+        currency_map: dict[int, Currency] = {int(c.id): c for c in currencies}
         existing_message = await get_message_by_id(session, cost_id)
-    existing_cost = parse_message_to_cost(existing_message) if existing_message else None
+    existing_cost = parse_message_to_cost(existing_message, currency_map) if existing_message else None
 
     # Non-admins can only edit their own costs
     current_user_id = get_current_user_telegram_id(request)
@@ -505,11 +613,19 @@ async def edit_cost(
     try:
         amount_decimal = Decimal(amount.replace(",", "."))
     except (InvalidOperation, ValueError):
-        return render_form_error(request, "Некорректная сумма", existing_cost, form_data, users)
+        return render_form_error(request, "Некорректная сумма", existing_cost, form_data, users, currencies)
 
     # Validate user_id
     if user_id < 1:
-        return render_form_error(request, "User ID должен быть больше 0", existing_cost, form_data, users)
+        return render_form_error(request, "User ID должен быть больше 0", existing_cost, form_data, users, currencies)
+
+    # Validate currency_id
+    catalogue_ids = {c.id for c in currencies}
+    resolved_currency_id: int | None = existing_cost.currency_id if existing_cost else None
+    if currency_id and currency_id in catalogue_ids:
+        resolved_currency_id = currency_id
+    elif currency_id and currency_id not in catalogue_ids:
+        return render_form_error(request, "Неизвестная валюта", existing_cost, form_data, users, currencies)
 
     # Parse datetime
     parsed_created_at = None
@@ -517,7 +633,7 @@ async def edit_cost(
         try:
             parsed_created_at = datetime.fromisoformat(created_at)
         except ValueError:
-            return render_form_error(request, "Некорректная дата", existing_cost, form_data, users)
+            return render_form_error(request, "Некорректная дата", existing_cost, form_data, users, currencies)
 
     text = f"{name} {amount_decimal}"
 
@@ -529,6 +645,8 @@ async def edit_cost(
                 text=text,
                 user_id=user_id,
                 created_at=parsed_created_at,
+                amount=amount_decimal,
+                currency_id=resolved_currency_id,
             )
             if not message:
                 raise HTTPException(status_code=404, detail="Расход не найден")
@@ -540,7 +658,7 @@ async def edit_cost(
             logger.exception("Error updating cost: %s", e)
             await session.rollback()
             return render_form_error(
-                request, "Ошибка сохранения в базу данных", existing_cost, form_data, users
+                request, "Ошибка сохранения в базу данных", existing_cost, form_data, users, currencies
             )
 
     set_flash_message(request, "Расход успешно обновлён", "success")

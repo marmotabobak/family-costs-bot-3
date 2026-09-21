@@ -18,7 +18,8 @@ pytestmark = pytest.mark.serial
 @pytest.fixture
 def client():
     """Create test client."""
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 @pytest.fixture(autouse=True)
@@ -58,6 +59,16 @@ def mock_db_session():
     mock_session.refresh = AsyncMock()
     mock_session.add = MagicMock()
     return mock_session
+
+
+@pytest.fixture(autouse=True)
+def mock_currency_functions():
+    """Mock list_currencies and get_base_currency to avoid real DB calls."""
+    with (
+        patch("bot.web.costs.list_currencies", new=AsyncMock(return_value=[])),
+        patch("bot.web.costs.get_base_currency", new=AsyncMock(return_value=MagicMock(code="RUB", id=1, is_base=True))),
+    ):
+        yield
 
 
 @pytest.fixture
@@ -452,6 +463,8 @@ class TestEditCostForm:
         mock_message.text = "Молоко 100"
         mock_message.user_id = 100  # Match authenticated_client telegram_id
         mock_message.created_at = datetime.now()
+        mock_message.amount = None
+        mock_message.currency_id = None
 
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(
@@ -494,6 +507,8 @@ class TestEditCost:
         mock_message.text = "Хлеб 50"
         mock_message.user_id = 100
         mock_message.created_at = datetime.now()
+        mock_message.amount = None
+        mock_message.currency_id = None
 
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(
@@ -654,6 +669,8 @@ class TestDatabaseErrorHandling:
         mock_message.text = "Test 100"
         mock_message.user_id = 100
         mock_message.created_at = datetime.now()
+        mock_message.amount = None
+        mock_message.currency_id = None
 
         with patch("bot.web.costs.get_db_session") as mock_get_session:
             mock_get_session.return_value.__aenter__ = AsyncMock(

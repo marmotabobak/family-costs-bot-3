@@ -121,6 +121,7 @@
                     <th>{{ sort_header('id', 'ID', order_by, order_dir, costs.per_page, filters.to_query_string()) }}</th>
                     <th>{{ sort_header('name', 'Название', order_by, order_dir, costs.per_page, filters.to_query_string()) }}</th>
                     <th>{{ sort_header('amount', 'Сумма', order_by, order_dir, costs.per_page, filters.to_query_string()) }}</th>
+                    <th>Сумма (база)</th>
                     <th>{{ sort_header('user_id', 'Пользователь', order_by, order_dir, costs.per_page, filters.to_query_string()) }}</th>
                     <th>{{ sort_header('created_at', 'Дата', order_by, order_dir, costs.per_page, filters.to_query_string()) }}</th>
                     <th>Действия</th>
@@ -133,7 +134,8 @@
                     <td class="cb-col"><input type="checkbox" class="row-checkbox" value="{{ cost.id }}" data-user-id="{{ cost.user_id }}" data-user-name="{{ users_map.get(cost.user_id, cost.user_id) }}"></td>
                     <td>{{ cost.id }}</td>
                     <td>{{ cost.name }}</td>
-                    <td class="amount {% if cost.amount < 0 %}negative{% endif %}">{{ cost.amount|format_amount }}</td>
+                    <td class="amount {% if cost.amount < 0 %}negative{% endif %}">{{ cost.amount|format_amount }}{% if cost.currency_code %} {{ cost.currency_code }}{% endif %}</td>
+                    <td class="amount {% if cost.base_amount < 0 %}negative{% endif %}">{{ cost.base_amount|format_amount }} {{ cost.base_currency_code }}</td>
                     <td>{{ users_map.get(cost.user_id, cost.user_id) }}</td>
                     <td>{{ cost.created_at.strftime('%d.%m.%Y') }}</td>
                     <td class="actions">

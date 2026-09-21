@@ -56,6 +56,22 @@
             {% endif %}
         </div>
 
+        {% if currencies %}
+        <div class="form-group">
+            <label for="currency_id">Валюта:</label>
+            <select id="currency_id" name="currency_id" class="form-input">
+                {% for c in currencies %}
+                <option value="{{ c.id }}"
+                    {% if cost and cost.currency_id == c.id %}selected
+                    {% elif not cost and c.is_base %}selected
+                    {% endif %}>
+                    {{ c.code }}{% if c.is_base %} (база){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+
         <div class="form-group">
             <label for="created_at">Дата:</label>
             <input type="date" id="created_at" name="created_at" value="{{ form_data.created_at if form_data else (cost.created_at.strftime('%Y-%m-%d') if cost else '') }}" class="form-input">

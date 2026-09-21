@@ -50,9 +50,13 @@ class TestHandleMessage:
         with (
             patch("bot.routers.messages.get_session") as mock_get_session,
             patch("bot.routers.messages.save_message") as mock_save,
+            patch("bot.routers.messages.get_base_currency") as mock_base_currency,
+            patch("bot.routers.messages.list_currencies") as mock_list_currencies,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_save.side_effect = SQLAlchemyError("DB error")
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_message(mock_message, mock_state)
 
@@ -66,9 +70,13 @@ class TestHandleMessage:
         with (
             patch("bot.routers.messages.get_session") as mock_get_session,
             patch("bot.routers.messages.save_message") as mock_save,
+            patch("bot.routers.messages.get_base_currency") as mock_base_currency,
+            patch("bot.routers.messages.list_currencies") as mock_list_currencies,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
             mock_save.return_value = saved
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_message(mock_message, mock_state)
 
@@ -79,10 +87,19 @@ class TestHandleMessage:
         assert "Продукты: 100" in text
 
     @pytest.mark.asyncio
-    async def test_mixed_lines_asks_confirmation(self, mock_message, mock_state):
+    async def test_mixed_lines_asks_confirmation(self, mock_message, mock_state, mock_session):
         mock_message.text = "Продукты 100\nbad\nВода 50"
 
-        await handle_message(mock_message, mock_state)
+        with (
+            patch("bot.routers.messages.get_session") as mock_get_session,
+            patch("bot.routers.messages.get_base_currency") as mock_base_currency,
+            patch("bot.routers.messages.list_currencies") as mock_list_currencies,
+        ):
+            mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
+
+            await handle_message(mock_message, mock_state)
 
         mock_state.set_state.assert_called_once_with(SaveCostsStates.waiting_confirmation)
         mock_message.answer.assert_called_once()
@@ -173,8 +190,12 @@ class TestHandleConfirm:
         with (
             patch("bot.routers.messages.get_session") as mock_get_session,
             patch("bot.routers.messages.save_message") as mock_save,
+            patch("bot.routers.messages.get_base_currency") as mock_base_currency,
+            patch("bot.routers.messages.list_currencies") as mock_list_currencies,
         ):
             mock_get_session.return_value.__aenter__.return_value = mock_session
+            mock_base_currency.return_value = MagicMock(code="RUB", id=1, is_base=True)
+            mock_list_currencies.return_value = []
 
             await handle_confirm(cb, mock_state)
 
