@@ -84,6 +84,7 @@ class TestAuthenticationFlow:
         mock_settings.env = Environment.test
         mock_settings.web_root_path = ""
         mock_settings.admin_telegram_id = None
+        mock_settings.secure_cookies = False
 
         user = _make_user(100, "Иван", "user", password_hash=hash_password("e2e-test-password"))
 

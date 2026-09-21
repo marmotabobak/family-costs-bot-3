@@ -43,6 +43,7 @@ services:
       ENV: ${ENV:-prod}
       WEB_PASSWORD: ${WEB_PASSWORD:-}
       WEB_ROOT_PATH: ${WEB_ROOT_PATH:-}
+      SECURE_COOKIES: ${SECURE_COOKIES:-false}
       ADMIN_TELEGRAM_ID: ${ADMIN_TELEGRAM_ID:-}
     ports:
       - "${WEB_PORT:-8000}:8000"
