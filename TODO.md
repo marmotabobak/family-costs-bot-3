@@ -1,0 +1,1 @@
+- [ ] Configure HTTPS (nginx + TLS) for the VM and set `SECURE_COOKIES=true` in `.env`

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     admin_telegram_id: int | None = None
     admin_default_password: str = ""
     web_root_path: str = ""
+    secure_cookies: bool = False  # TODO: set SECURE_COOKIES=true in .env once HTTPS is configured
 
     @field_validator("bot_token")
     @classmethod

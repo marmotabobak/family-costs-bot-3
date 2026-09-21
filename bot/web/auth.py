@@ -11,7 +11,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from bot.config import Environment, settings
+from bot.config import settings
 from bot.db.dependencies import get_session as get_db_session
 from bot.db.repositories.users import get_all_users, get_user_by_telegram_id
 from bot.security import verify_password
@@ -303,7 +303,7 @@ async def login(request: Request, password: str = Form(...), user_id: str = Form
         httponly=True,
         samesite="lax",
         max_age=SESSION_LIFETIME,
-        secure=settings.env == Environment.prod,
+        secure=settings.secure_cookies,
     )
     logger.info("User %s (role=%s) logged in to admin panel", user.name, user.role)
     return response

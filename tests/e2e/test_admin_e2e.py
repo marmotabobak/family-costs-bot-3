@@ -187,6 +187,7 @@ def _patch_auth_settings():
         mock.web_root_path = ""
         mock.env = "test"
         mock.admin_telegram_id = None
+        mock.secure_cookies = False
         yield
 
 
